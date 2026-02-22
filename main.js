@@ -90,7 +90,12 @@ function saveCachedUsage(usage) {
 function getAccessToken() {
   try {
     const creds = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf-8'));
-    return creds.claudeAiOauth?.accessToken || null;
+    const token = creds.claudeAiOauth?.accessToken;
+    // Validate: non-empty string, no CRLF (header injection guard)
+    if (typeof token !== 'string' || token.length === 0 || /[\r\n]/.test(token)) {
+      return null;
+    }
+    return token;
   } catch {
     return null;
   }
@@ -122,8 +127,14 @@ function fetchUsage() {
         'User-Agent': `claude-usage-widget/${app.getVersion()}`,
       },
     }, (res) => {
+      const MAX_BODY = 1024 * 1024; // 1 MB
       let body = '';
-      res.on('data', (chunk) => body += chunk);
+      res.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) {
+          req.destroy(new Error('Response body too large'));
+        }
+      });
       res.on('end', () => {
         syncing = false;
         try {
@@ -145,6 +156,11 @@ function fetchUsage() {
   });
 }
 
+function clampPct(val) {
+  const n = Number(val) || 0;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
 function buildUsage(data) {
   const usage = {
     session: { pct: 0, resetsAt: null, label: 'Current session' },
@@ -156,29 +172,30 @@ function buildUsage(data) {
 
   if (data.five_hour) {
     usage.session = {
-      pct: Math.round(data.five_hour.utilization || 0),
+      pct: clampPct(data.five_hour.utilization),
       resetsAt: data.five_hour.resets_at,
       label: 'Current session',
     };
   }
   if (data.seven_day) {
     usage.weekAll = {
-      pct: Math.round(data.seven_day.utilization || 0),
+      pct: clampPct(data.seven_day.utilization),
       resetsAt: data.seven_day.resets_at,
       label: 'Current week (all models)',
     };
   }
   if (data.seven_day_sonnet) {
     usage.weekSonnet = {
-      pct: Math.round(data.seven_day_sonnet.utilization || 0),
+      pct: clampPct(data.seven_day_sonnet.utilization),
       resetsAt: data.seven_day_sonnet.resets_at,
       label: 'Current week (Sonnet only)',
     };
   }
   if (data.extra_usage) {
+    const util = Number(data.extra_usage.utilization);
     usage.extraUsage = {
-      enabled: data.extra_usage.is_enabled || false,
-      utilization: data.extra_usage.utilization,
+      enabled: !!data.extra_usage.is_enabled,
+      utilization: Number.isFinite(util) ? util : null,
     };
   }
 
@@ -194,7 +211,11 @@ async function doSync() {
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
     updateTrayTooltip();
   } catch (err) {
-    if (win && !win.isDestroyed()) win.webContents.send('sync-error', err.message);
+    // Truncate error — may contain untrusted content from API response
+    const safeMsg = typeof err.message === 'string'
+      ? err.message.slice(0, 200)
+      : 'Unknown error';
+    if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
   }
 }
 
@@ -269,10 +290,19 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 
   win.loadFile('index.html');
+
+  // Navigation guards — block external URLs and new windows
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.on('close', (e) => {
     e.preventDefault();
@@ -316,7 +346,7 @@ function startFileWatcher() {
   try {
     if (fs.existsSync(PROJECTS_DIR)) {
       fileWatcher = fs.watch(PROJECTS_DIR, { recursive: true }, (_, filename) => {
-        if (!filename || !filename.endsWith('.jsonl')) return;
+        if (!filename || !/\.jsonl$/i.test(filename)) return;
         const now = Date.now();
         if (now - lastAutoSync < 60000) return;
         if (fileChangeTimer) clearTimeout(fileChangeTimer);
