@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Usage</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0c0c12;
+    --surface: #13131d;
+    --surface2: #1b1b28;
+    --border: #2a2a3d;
+    --text: #e2e2f0;
+    --text-dim: #7e7e98;
+    --accent: #d4845a;
+    --green: #4ade80;
+    --yellow: #facc15;
+    --red: #f87171;
+    --bar-bg: #252538;
+    --bar-fill: #7c7cba;
+  }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+  .widget {
+    padding: 20px 24px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+  .dot.syncing { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); animation: pulse 0.5s infinite; }
+  .dot.stale { background: var(--text-dim); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .title { font-size: 14px; font-weight: 600; }
+  .sync-status {
+    font-size: 8px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    display: flex; align-items: center; gap: 3px;
+  }
+  .sync-status.live { color: var(--green); }
+  .sync-status.syncing { color: var(--yellow); }
+  .sync-status .mini-dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+  .sync-status.live .mini-dot { background: var(--green); }
+  .sync-status.syncing .mini-dot { background: var(--yellow); }
+  .window-controls {
+    display: flex; gap: 6px;
+    -webkit-app-region: no-drag;
+  }
+  .win-btn {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: none; cursor: pointer; opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .win-btn:hover { opacity: 1; }
+  .win-btn.minimize { background: var(--yellow); }
+  .win-btn.close { background: var(--red); }
+
+  .usage-section { margin-bottom: 16px; }
+  .usage-row { margin-bottom: 14px; }
+  .usage-label { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .bar-container { display: flex; align-items: center; gap: 10px; }
+  .bar-track {
+    flex: 1; height: 14px; background: var(--bar-bg);
+    border-radius: 3px; overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; border-radius: 3px;
+    background: var(--bar-fill);
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 2px;
+  }
+  .bar-fill.warning { background: var(--yellow); }
+  .bar-fill.danger { background: var(--red); }
+  .bar-pct {
+    font-size: 12px; font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 70px; text-align: right;
+    color: var(--text-dim);
+  }
+  .reset-info {
+    font-size: 10px; color: var(--text-dim);
+    margin-top: 3px; font-family: 'JetBrains Mono', monospace;
+  }
+  .extra-section {
+    border-top: 1px solid var(--border);
+    padding-top: 12px; margin-top: 4px;
+  }
+  .extra-label { font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+  .extra-info { font-size: 11px; color: var(--text-dim); }
+  .footer {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .footer-hint {
+    font-size: 10px; color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="widget">
+  <div class="header">
+    <div class="header-left">
+      <span class="dot stale" id="statusDot"></span>
+      <span class="title">Claude Usage</span>
+      <span class="sync-status" id="syncStatus"></span>
+    </div>
+    <div class="window-controls">
+      <button class="win-btn minimize" id="minimizeBtn" title="Minimize to tray (Ctrl+\)"></button>
+      <button class="win-btn close" id="closeBtn" title="Quit"></button>
+    </div>
+  </div>
+
+  <div class="usage-section">
+    <div class="usage-row" id="sessionRow"></div>
+    <div class="usage-row" id="weekAllRow"></div>
+    <div class="usage-row" id="weekSonnetRow"></div>
+  </div>
+
+  <div class="extra-section">
+    <div class="extra-label">Extra usage</div>
+    <div class="extra-info" id="extraInfo">Loading...</div>
+  </div>
+
+  <div class="footer">
+    <span class="footer-hint" id="footerHint">Syncing...</span>
+  </div>
+</div>
+
+<script>
+var usageData = null;
+
+function createElement(tag, cls, text) {
+  var el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function formatResetTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h = d.getHours();
+  var ampm = h >= 12 ? 'pm' : 'am';
+  var h12 = h % 12 || 12;
+  var min = d.getMinutes();
+  var minStr = min > 0 ? ':' + (min < 10 ? '0' : '') + min : '';
+  var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  var tzShort = tz.split('/').pop().replace(/_/g, ' ');
+  return 'Resets ' + months[d.getMonth()] + ' ' + d.getDate() + ', ' + h12 + minStr + ampm + ' (' + tzShort + ')';
+}
+
+function getBarClass(pct) {
+  if (pct >= 85) return 'danger';
+  if (pct >= 60) return 'warning';
+  return '';
+}
+
+function renderUsageRow(container, data) {
+  while (container.firstChild) container.removeChild(container.firstChild);
+  if (!data) return;
+  container.appendChild(createElement('div', 'usage-label', data.label));
+  var barContainer = createElement('div', 'bar-container');
+  var track = createElement('div', 'bar-track');
+  var fill = createElement('div', 'bar-fill ' + getBarClass(data.pct));
+  fill.style.width = Math.max(1, data.pct) + '%';
+  track.appendChild(fill);
+  barContainer.appendChild(track);
+  barContainer.appendChild(createElement('div', 'bar-pct', data.pct + '% used'));
+  container.appendChild(barContainer);
+  if (data.resetsAt) {
+    container.appendChild(createElement('div', 'reset-info', formatResetTime(data.resetsAt)));
+  }
+}
+
+function renderAll() {
+  if (!usageData) return;
+  renderUsageRow(document.getElementById('sessionRow'), usageData.session);
+  renderUsageRow(document.getElementById('weekAllRow'), usageData.weekAll);
+  renderUsageRow(document.getElementById('weekSonnetRow'), usageData.weekSonnet);
+
+  var extra = document.getElementById('extraInfo');
+  if (usageData.extraUsage && usageData.extraUsage.enabled) {
+    extra.textContent = usageData.extraUsage.utilization !== null
+      ? usageData.extraUsage.utilization + '% used'
+      : 'Enabled';
+  } else {
+    extra.textContent = 'Not enabled';
+  }
+
+  if (usageData.syncTime) {
+    var ago = Math.round((Date.now() - usageData.syncTime) / 60000);
+    document.getElementById('footerHint').textContent =
+      ago < 1 ? 'Synced just now' : 'Synced ' + ago + 'm ago';
+  }
+}
+
+function setSyncStatus(status) {
+  var dot = document.getElementById('statusDot');
+  var badge = document.getElementById('syncStatus');
+
+  if (status === 'syncing') {
+    dot.className = 'dot syncing';
+    badge.className = 'sync-status syncing';
+    badge.textContent = '';
+    badge.appendChild(createElement('span', 'mini-dot'));
+    badge.appendChild(document.createTextNode(' SYNCING'));
+  } else if (status === 'live') {
+    dot.className = 'dot live';
+    badge.className = 'sync-status live';
+    badge.textContent = '';
+    badge.appendChild(createElement('span', 'mini-dot'));
+    badge.appendChild(document.createTextNode(' LIVE'));
+  } else {
+    dot.className = 'dot stale';
+    badge.className = 'sync-status';
+    badge.textContent = '';
+  }
+}
+
+// IPC bridge
+document.getElementById('minimizeBtn').addEventListener('click', function() {
+  window.electronAPI.minimize();
+});
+
+document.getElementById('closeBtn').addEventListener('click', function() {
+  window.electronAPI.minimize();
+});
+
+// Listen for usage updates from main process
+window.electronAPI.onUsageUpdate(function(data) {
+  usageData = data;
+  renderAll();
+  setSyncStatus('live');
+});
+
+window.electronAPI.onSyncStart(function() {
+  setSyncStatus('syncing');
+});
+
+window.electronAPI.onSyncError(function(msg) {
+  setSyncStatus('stale');
+});
+
+// Request initial data
+window.electronAPI.requestSync();
+
+// Update "synced X ago" every 30s
+setInterval(function() {
+  if (usageData && usageData.syncTime) {
+    var ago = Math.round((Date.now() - usageData.syncTime) / 60000);
+    document.getElementById('footerHint').textContent =
+      ago < 1 ? 'Synced just now' : 'Synced ' + ago + 'm ago';
+  }
+}, 30000);
+</script>
+</body>
+</html>
