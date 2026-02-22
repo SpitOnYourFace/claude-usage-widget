@@ -33,7 +33,7 @@ Grab the latest release for your platform from [Releases](../../releases):
 ### From source
 
 ```bash
-git clone https://github.com/USER/claude-usage-widget.git
+git clone https://github.com/SpitOnYourFace/claude-usage-widget.git
 cd claude-usage-widget
 npm install
 npm start
