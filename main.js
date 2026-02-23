@@ -116,6 +116,11 @@ function fetchUsage() {
     }
 
     const url = new URL(USAGE_API);
+    if (url.hostname !== 'api.anthropic.com') {
+      syncing = false;
+      reject(new Error('Unexpected API hostname'));
+      return;
+    }
     const req = https.request({
       hostname: url.hostname,
       path: url.pathname,
