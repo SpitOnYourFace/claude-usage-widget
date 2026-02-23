@@ -15,20 +15,38 @@ A desktop widget that shows your **real-time Claude Pro/Max subscription usage**
 - **Zero cost** — reads the usage endpoint directly, no messages consumed
 - **Single instance** — won't open duplicates
 
-## Requirements
+## Prerequisites
 
-- **Claude Code** installed and logged in (the app reads your OAuth token from `~/.claude/.credentials.json`)
+- [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) installed and logged in (the app reads your OAuth token from `~/.claude/.credentials.json`)
 - A **Claude Pro or Max** subscription
 
 ## Install
 
-### Download
+Download the latest release for your platform from [**Releases**](../../releases/latest).
 
-Grab the latest release for your platform from [Releases](../../releases):
+### Windows
 
-- **Windows**: `.exe` installer
-- **macOS**: `.dmg`
-- **Linux**: `.AppImage`
+1. Download `Claude.Usage.Widget.Setup.x.x.x.exe`
+2. Run the installer
+3. The widget starts in the system tray — press **Ctrl+\\** to show it
+4. Right-click the tray icon and enable **"Start on Login"** to auto-start on boot
+
+### macOS
+
+1. Download the `.dmg` for your Mac:
+   - **Apple Silicon** (M1/M2/M3/M4): `*-arm64.dmg`
+   - **Intel**: `*.dmg` (without arm64)
+2. Open the `.dmg` and drag the app to Applications
+3. Launch the app — press **Ctrl+\\** to show the widget
+
+### Linux
+
+1. Download the `.AppImage` for your architecture:
+   - **x64**: `*.AppImage` (without arm64)
+   - **ARM64**: `*-arm64.AppImage`
+2. Make it executable: `chmod +x *.AppImage`
+3. Run it: `./Claude.Usage.Widget-*.AppImage`
+4. Press **Ctrl+\\** to show the widget
 
 ### From source
 
@@ -41,10 +59,10 @@ npm start
 
 ## Usage
 
-1. Launch the app — it starts hidden in the system tray
-2. Press **Ctrl+\\** to show/hide the widget
-3. Click the tray icon to toggle, or right-click for options
-4. Enable "Start on Login" from the tray menu to auto-start on boot
+- Press **Ctrl+\\** to show/hide the widget
+- Click the tray icon to toggle, or right-click for options
+- Enable **"Start on Login"** from the tray menu to auto-start on boot
+- The widget auto-refreshes every 60s when visible, every 5 min in background
 
 ## How it works
 
