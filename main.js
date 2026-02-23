@@ -7,6 +7,7 @@ const {
   ipcMain,
   nativeImage,
   screen,
+  powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -26,10 +27,14 @@ const HOTKEY = 'Ctrl+\\';
 let win = null;
 let tray = null;
 let syncing = false;
+let syncStartedAt = 0;
+let activeRequest = null;
 let cachedUsage = null;
 let fileWatcher = null;
 let fileChangeTimer = null;
 let lastAutoSync = 0;
+
+const SYNC_TIMEOUT_MS = 30000; // force-reset syncing flag after 30s
 
 // --- Paths (asar-safe) ---
 
@@ -103,14 +108,28 @@ function getAccessToken() {
 
 // --- Fetch usage from Anthropic API ---
 
+function resetSyncIfStale() {
+  if (syncing && syncStartedAt > 0 && (Date.now() - syncStartedAt) > SYNC_TIMEOUT_MS) {
+    if (activeRequest) {
+      try { activeRequest.destroy(); } catch { /* ignore */ }
+      activeRequest = null;
+    }
+    syncing = false;
+    syncStartedAt = 0;
+  }
+}
+
 function fetchUsage() {
   return new Promise((resolve, reject) => {
+    resetSyncIfStale();
     if (syncing) { reject(new Error('Already syncing')); return; }
     syncing = true;
+    syncStartedAt = Date.now();
 
     const token = getAccessToken();
     if (!token) {
       syncing = false;
+      syncStartedAt = 0;
       reject(new Error('No OAuth token. Log in to Claude Code first.'));
       return;
     }
@@ -118,6 +137,7 @@ function fetchUsage() {
     const url = new URL(USAGE_API);
     if (url.hostname !== 'api.anthropic.com') {
       syncing = false;
+      syncStartedAt = 0;
       reject(new Error('Unexpected API hostname'));
       return;
     }
@@ -127,6 +147,8 @@ function fetchUsage() {
       if (settled) return;
       settled = true;
       syncing = false;
+      syncStartedAt = 0;
+      activeRequest = null;
       err ? reject(err) : resolve(data);
     };
 
@@ -164,6 +186,7 @@ function fetchUsage() {
       });
     });
 
+    activeRequest = req;
     req.on('error', (err) => finish(err));
     req.setTimeout(10000, () => { req.destroy(); finish(new Error('Timeout')); });
     req.end();
@@ -427,6 +450,25 @@ app.whenReady().then(() => {
   }, 300000);
 
   startFileWatcher();
+
+  // --- Power monitor: handle sleep/wake ---
+  powerMonitor.on('suspend', () => {
+    // PC is going to sleep — kill any in-flight request
+    if (activeRequest) {
+      try { activeRequest.destroy(); } catch { /* ignore */ }
+      activeRequest = null;
+    }
+    syncing = false;
+    syncStartedAt = 0;
+  });
+
+  powerMonitor.on('resume', () => {
+    // PC woke up — reset state and sync after a short delay (network may take a moment)
+    syncing = false;
+    syncStartedAt = 0;
+    activeRequest = null;
+    setTimeout(() => doSync(), 3000);
+  });
 });
 
 app.on('will-quit', () => {
