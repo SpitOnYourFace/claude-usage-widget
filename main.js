@@ -254,10 +254,10 @@ function updateTrayTooltip() {
   if (!tray) return;
   if (cachedUsage) {
     tray.setToolTip(
-      `Claude Usage - Session: ${cachedUsage.session.pct}% | Week: ${cachedUsage.weekAll.pct}%`
+      `Claude Meter - Session: ${cachedUsage.session.pct}% | Week: ${cachedUsage.weekAll.pct}%`
     );
   } else {
-    tray.setToolTip('Claude Usage Widget');
+    tray.setToolTip('Claude Meter');
   }
 }
 

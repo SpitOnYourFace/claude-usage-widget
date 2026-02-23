@@ -1,6 +1,6 @@
-# Claude Usage Widget
+# Claude Meter
 
-A desktop widget that shows your **real-time Claude Pro/Max subscription usage** — session limits, weekly limits, and Sonnet-specific limits — pulled directly from the Anthropic API.
+A desktop meter that shows your **real-time Claude Pro/Max subscription usage** — session limits, weekly limits, and Sonnet-specific limits — pulled directly from the Anthropic API.
 
 ![Screenshot](assets/screenshot.png)
 
@@ -26,7 +26,7 @@ Download the latest release for your platform from [**Releases**](../../releases
 
 ### Windows
 
-1. Download `Claude.Usage.Widget.Setup.x.x.x.exe`
+1. Download `Claude.Meter.Setup.x.x.x.exe`
 2. Run the installer
 3. The widget starts in the system tray — press **Ctrl+\\** to show it
 4. Right-click the tray icon and enable **"Start on Login"** to auto-start on boot
@@ -45,7 +45,7 @@ Download the latest release for your platform from [**Releases**](../../releases
    - **x64**: `*.AppImage` (without arm64)
    - **ARM64**: `*-arm64.AppImage`
 2. Make it executable: `chmod +x *.AppImage`
-3. Run it: `./Claude.Usage.Widget-*.AppImage`
+3. Run it: `./Claude.Meter-*.AppImage`
 4. Press **Ctrl+\\** to show the widget
 
 ### From source
