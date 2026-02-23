@@ -121,6 +121,15 @@ function fetchUsage() {
       reject(new Error('Unexpected API hostname'));
       return;
     }
+
+    let settled = false;
+    const finish = (err, data) => {
+      if (settled) return;
+      settled = true;
+      syncing = false;
+      err ? reject(err) : resolve(data);
+    };
+
     const req = https.request({
       hostname: url.hostname,
       path: url.pathname,
@@ -137,26 +146,26 @@ function fetchUsage() {
       res.on('data', (chunk) => {
         body += chunk;
         if (body.length > MAX_BODY) {
-          req.destroy(new Error('Response body too large'));
+          req.destroy();
+          finish(new Error('Response body too large'));
         }
       });
       res.on('end', () => {
-        syncing = false;
         try {
           const data = JSON.parse(body);
           if (data.type === 'error') {
-            reject(new Error(data.error?.message || 'API error'));
+            finish(new Error(data.error?.message || 'API error'));
             return;
           }
-          resolve(data);
+          finish(null, data);
         } catch {
-          reject(new Error('Invalid response'));
+          finish(new Error('Invalid response'));
         }
       });
     });
 
-    req.on('error', (err) => { syncing = false; reject(err); });
-    req.setTimeout(10000, () => { syncing = false; req.destroy(); reject(new Error('Timeout')); });
+    req.on('error', (err) => finish(err));
+    req.setTimeout(10000, () => { req.destroy(); finish(new Error('Timeout')); });
     req.end();
   });
 }
@@ -267,7 +276,7 @@ function buildTrayMenu() {
       },
     },
     { type: 'separator' },
-    { label: 'Quit', click: () => { win.destroy(); app.quit(); } },
+    { label: 'Quit', click: () => { if (win && !win.isDestroyed()) win.destroy(); app.quit(); } },
   ]);
 }
 
@@ -402,7 +411,7 @@ app.whenReady().then(() => {
   // Send cached data on load, then sync
   win.webContents.on('did-finish-load', () => {
     if (cachedUsage) win.webContents.send('usage-update', cachedUsage);
-    doSync();
+    if (!syncing) doSync();
   });
 
   // Auto-refresh: 60s visible, 5min hidden
