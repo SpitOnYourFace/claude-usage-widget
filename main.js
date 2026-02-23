@@ -240,10 +240,13 @@ function getTrayIcon() {
   if (fs.existsSync(iconPath)) {
     return nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
   }
-  // Fallback: generate simple icon
+  // Fallback: generate simple gauge icon
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-    <rect width="16" height="16" rx="3" fill="#d4845a"/>
-    <text x="8" y="12" font-size="11" font-weight="bold" fill="white" text-anchor="middle" font-family="sans-serif">C</text>
+    <rect width="16" height="16" rx="3.5" fill="#0a0a14"/>
+    <path d="M 3 10 A 5 5 0 0 1 13 10" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"/>
+    <path d="M 7 10 A 1.5 1.5 0 0 1 13 10" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+    <line x1="8" y1="10" x2="5.5" y2="6" stroke="white" stroke-width="1" stroke-linecap="round"/>
+    <circle cx="8" cy="10" r="1" fill="#d4845a"/>
   </svg>`;
   return nativeImage.createFromDataURL(
     `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
