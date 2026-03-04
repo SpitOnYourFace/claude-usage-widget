@@ -36,6 +36,9 @@ let fileWatcher = null;
 let fileChangeTimer = null;
 let lastAutoSync = 0;
 let usageHistory = [];
+let lastAlertTimes = { session: 0, weekAll: 0, weekSonnet: 0 };
+const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const ALERT_THRESHOLDS = { session: 80, weekAll: 90, weekSonnet: 90 };
 
 const SYNC_TIMEOUT_MS = 30000; // force-reset syncing flag after 30s
 
@@ -140,6 +143,50 @@ function appendHistory(usage) {
   usageHistory = usageHistory.filter((p) => p.ts > cutoff);
 
   saveHistory();
+}
+
+// --- Desktop notifications ---
+
+function checkAndNotify(usage) {
+  const { Notification } = require('electron');
+  if (!Notification.isSupported()) return;
+
+  const checks = [
+    { key: 'session', pct: usage.session.pct, label: 'Session', resetsAt: usage.session.resetsAt },
+    { key: 'weekAll', pct: usage.weekAll.pct, label: 'Weekly (all)', resetsAt: usage.weekAll.resetsAt },
+    { key: 'weekSonnet', pct: usage.weekSonnet.pct, label: 'Weekly (Sonnet)', resetsAt: usage.weekSonnet.resetsAt },
+  ];
+
+  const now = Date.now();
+  for (const check of checks) {
+    if (check.pct >= ALERT_THRESHOLDS[check.key]
+      && (now - lastAlertTimes[check.key]) > ALERT_COOLDOWN_MS) {
+      lastAlertTimes[check.key] = now;
+
+      let body = `Claude ${check.label} usage at ${check.pct}%`;
+      if (check.resetsAt) {
+        const diff = new Date(check.resetsAt).getTime() - now;
+        if (diff > 0) {
+          const hours = Math.floor(diff / 3600000);
+          const mins = Math.floor((diff % 3600000) / 60000);
+          body += hours > 0
+            ? ` \u2014 resets in ${hours}h ${mins}m`
+            : ` \u2014 resets in ${mins}m`;
+        }
+      }
+
+      const notif = new Notification({
+        title: 'Claude Meter Alert',
+        body,
+        icon: getAssetPath('icon.png'),
+        silent: false,
+      });
+      notif.on('click', () => {
+        if (win && !win.isVisible()) toggleWindow();
+      });
+      notif.show();
+    }
+  }
 }
 
 // --- OAuth token ---
@@ -301,6 +348,7 @@ async function doSync() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('history-update', usageHistory);
     }
+    checkAndNotify(cachedUsage);
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
     updateTrayTooltip();
   } catch (err) {
