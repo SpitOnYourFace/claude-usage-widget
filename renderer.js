@@ -11,15 +11,23 @@ function formatResetTime(ts) {
   if (!ts) return '';
   var d = new Date(ts);
   if (isNaN(d.getTime())) return '';
-  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var h = d.getHours();
-  var ampm = h >= 12 ? 'pm' : 'am';
-  var h12 = h % 12 || 12;
-  var min = d.getMinutes();
-  var minStr = min > 0 ? ':' + (min < 10 ? '0' : '') + min : '';
-  var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  var tzShort = tz.split('/').pop().replace(/_/g, ' ');
-  return 'Resets ' + months[d.getMonth()] + ' ' + d.getDate() + ', ' + h12 + minStr + ampm + ' (' + tzShort + ')';
+  var diff = d.getTime() - Date.now();
+  if (diff <= 0) return 'Resetting...';
+  // If more than 24h, show date
+  if (diff > 86400000) {
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var h = d.getHours();
+    var ampm = h >= 12 ? 'pm' : 'am';
+    var h12 = h % 12 || 12;
+    var min = d.getMinutes();
+    var minStr = min > 0 ? ':' + (min < 10 ? '0' : '') + min : '';
+    return 'Resets ' + months[d.getMonth()] + ' ' + d.getDate() + ', ' + h12 + minStr + ampm;
+  }
+  // Under 24h: live countdown
+  var hours = Math.floor(diff / 3600000);
+  var mins = Math.floor((diff % 3600000) / 60000);
+  if (hours > 0) return 'Resets in ' + hours + 'h ' + mins + 'm';
+  return 'Resets in ' + mins + 'm';
 }
 
 function getBarClass(pct) {
@@ -116,11 +124,8 @@ window.electronAPI.onSyncError(function(msg) {
 // Request initial data
 window.electronAPI.requestSync();
 
-// Update "synced X ago" every 30s
+// Update countdown + "synced X ago" every second
 setInterval(function() {
-  if (usageData && usageData.syncTime) {
-    var ago = Math.round((Date.now() - usageData.syncTime) / 60000);
-    document.getElementById('footerHint').textContent =
-      ago < 1 ? 'Synced just now' : 'Synced ' + ago + 'm ago';
-  }
-}, 30000);
+  if (!usageData) return;
+  renderAll();
+}, 1000);
