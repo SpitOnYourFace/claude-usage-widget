@@ -25,8 +25,11 @@
     "files": [
       "main.js",
       "preload.js",
+      "dashboard-preload.js",
       "renderer.js",
+      "dashboard.js",
       "index.html",
+      "dashboard.html",
       "assets/**/*"
     ],
     "win": {

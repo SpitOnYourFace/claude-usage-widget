@@ -207,6 +207,10 @@ window.electronAPI.onHistoryUpdate(function(data) {
   historyData = data;
 });
 
+document.getElementById('dashBtn').addEventListener('click', function() {
+  window.electronAPI.openDashboard();
+});
+
 // Request initial data
 window.electronAPI.requestSync();
 

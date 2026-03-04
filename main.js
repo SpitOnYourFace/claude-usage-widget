@@ -34,6 +34,7 @@ let activeRequest = null;
 let cachedUsage = null;
 let fileWatcher = null;
 let fileChangeTimer = null;
+let dashWin = null;
 let lastAutoSync = 0;
 let usageHistory = [];
 let lastAlertTimes = { session: 0, weekAll: 0, weekSonnet: 0 };
@@ -378,6 +379,10 @@ async function doSync() {
     checkAndNotify(cachedUsage);
     updateTrayBadge(cachedUsage);
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
+    if (dashWin && !dashWin.isDestroyed()) {
+      dashWin.webContents.send('usage-update', cachedUsage);
+      dashWin.webContents.send('history-update', usageHistory);
+    }
     updateTrayTooltip();
   } catch (err) {
     // Truncate error — may contain untrusted content from API response
@@ -424,6 +429,7 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Show  (Ctrl+\\)', click: () => toggleWindow() },
     { label: 'Sync Now', click: () => doSync() },
+    { label: 'Dashboard', click: () => openDashboard() },
     { type: 'separator' },
     {
       label: 'Start on Login',
@@ -514,6 +520,44 @@ function toggleWindow() {
   }
 }
 
+function openDashboard() {
+  if (dashWin && !dashWin.isDestroyed()) {
+    dashWin.focus();
+    return;
+  }
+
+  const iconPath = getAssetPath('icon.png');
+  dashWin = new BrowserWindow({
+    width: 900,
+    height: 650,
+    minWidth: 700,
+    minHeight: 500,
+    backgroundColor: '#0c0c12',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'dashboard-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+
+  dashWin.loadFile('dashboard.html');
+
+  dashWin.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
+  });
+  dashWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  dashWin.webContents.on('did-finish-load', () => {
+    if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
+    if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
+  });
+
+  dashWin.on('closed', () => { dashWin = null; });
+}
+
 // --- File watching ---
 
 function startFileWatcher() {
@@ -576,6 +620,25 @@ app.whenReady().then(() => {
       win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 160 });
     } else {
       win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 400 });
+    }
+  });
+
+  ipcMain.on('open-dashboard', () => openDashboard());
+
+  ipcMain.on('dashboard-request-data', () => {
+    if (dashWin && !dashWin.isDestroyed()) {
+      if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
+      if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
+    }
+    doSync();
+  });
+
+  ipcMain.on('dashboard-save-settings', (_, settings) => {
+    if (settings.alertThresholds) {
+      const t = settings.alertThresholds;
+      if (t.session) ALERT_THRESHOLDS.session = t.session.value;
+      if (t.weekAll) ALERT_THRESHOLDS.weekAll = t.weekAll.value;
+      if (t.weekSonnet) ALERT_THRESHOLDS.weekSonnet = t.weekSonnet.value;
     }
   });
 
