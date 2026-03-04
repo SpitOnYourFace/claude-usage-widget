@@ -20,6 +20,8 @@ const CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const DATA_FILE = path.join(CLAUDE_DIR, 'usage-widget-data.json');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 const BOUNDS_FILE = path.join(CLAUDE_DIR, 'usage-widget-bounds.json');
+const HISTORY_FILE = path.join(CLAUDE_DIR, 'usage-widget-history.json');
+const HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const USAGE_API = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
 const HOTKEY = 'Ctrl+\\';
@@ -33,6 +35,7 @@ let cachedUsage = null;
 let fileWatcher = null;
 let fileChangeTimer = null;
 let lastAutoSync = 0;
+let usageHistory = [];
 
 const SYNC_TIMEOUT_MS = 30000; // force-reset syncing flag after 30s
 
@@ -88,6 +91,55 @@ function saveCachedUsage(usage) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ lastSync: Date.now(), usage }, null, 2));
   } catch { /* ignore */ }
+}
+
+// --- Usage history ---
+
+function loadHistory() {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+      if (data.version === 1 && Array.isArray(data.points)) {
+        return data.points;
+      }
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function saveHistory() {
+  try {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify({
+      version: 1,
+      points: usageHistory,
+    }, null, 2));
+  } catch { /* ignore */ }
+}
+
+function appendHistory(usage) {
+  const point = {
+    ts: Date.now(),
+    session: usage.session.pct,
+    weekAll: usage.weekAll.pct,
+    weekSonnet: usage.weekSonnet.pct,
+  };
+
+  // Deduplicate: skip if values unchanged from last point
+  const last = usageHistory[usageHistory.length - 1];
+  if (last
+    && last.session === point.session
+    && last.weekAll === point.weekAll
+    && last.weekSonnet === point.weekSonnet) {
+    return;
+  }
+
+  usageHistory.push(point);
+
+  // Prune points older than 30 days
+  const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+  usageHistory = usageHistory.filter((p) => p.ts > cutoff);
+
+  saveHistory();
 }
 
 // --- OAuth token ---
@@ -245,6 +297,7 @@ async function doSync() {
     const data = await fetchUsage();
     cachedUsage = buildUsage(data);
     saveCachedUsage(cachedUsage);
+    appendHistory(cachedUsage);
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
     updateTrayTooltip();
   } catch (err) {
@@ -388,7 +441,7 @@ function startFileWatcher() {
       fileWatcher = fs.watch(PROJECTS_DIR, { recursive: true }, (_, filename) => {
         if (!filename || !/\.jsonl$/i.test(filename)) return;
         const now = Date.now();
-        if (now - lastAutoSync < 60000) return;
+        if (now - lastAutoSync < 15000) return;
         if (fileChangeTimer) clearTimeout(fileChangeTimer);
         fileChangeTimer = setTimeout(() => {
           lastAutoSync = Date.now();
@@ -417,6 +470,7 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
   cachedUsage = loadCachedUsage();
+  usageHistory = loadHistory();
 
   createWindow();
 
@@ -440,14 +494,14 @@ app.whenReady().then(() => {
     if (!syncing) doSync();
   });
 
-  // Auto-refresh: 60s visible, 5min hidden
+  // Auto-refresh: 15s visible, 60s hidden
   setInterval(() => {
     if (win && win.isVisible()) doSync();
-  }, 60000);
+  }, 15000);
 
   setInterval(() => {
     if (win && !win.isVisible()) doSync();
-  }, 300000);
+  }, 60000);
 
   startFileWatcher();
 
