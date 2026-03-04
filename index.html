@@ -96,7 +96,7 @@
   .bar-pct {
     font-size: 12px; font-weight: 600;
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-    min-width: 70px; text-align: right;
+    min-width: 40px; text-align: right;
     color: var(--text-dim);
   }
   .sparkline {
@@ -130,6 +130,44 @@
   .footer-hint {
     font-size: 10px; color: var(--text-dim);
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+  .footer-update-btn {
+    display: none;
+    padding: 4px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), #c06a3a);
+    color: #fff;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: all 0.25s ease;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    box-shadow: 0 0 8px rgba(212, 132, 90, 0.3);
+  }
+  .footer-update-btn:hover {
+    box-shadow: 0 0 14px rgba(212, 132, 90, 0.5);
+    transform: translateY(-1px);
+  }
+  .footer-update-btn:active { transform: translateY(0); }
+  .footer-update-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+  .footer-update-btn.visible { display: inline-block; }
+  .footer-update-btn.downloading {
+    background: var(--surface2);
+    border-color: var(--border);
+    box-shadow: none;
+    animation: pulse-download 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-download {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
   }
 
   /* Compact mode */
@@ -171,7 +209,7 @@
   </div>
 
   <div class="footer">
-    <span class="footer-update" id="updateBanner" style="display:none; font-size:10px; color:var(--accent); cursor:pointer; -webkit-app-region:no-drag;"></span>
+    <button class="footer-update-btn" id="updateBtn"></button>
     <span class="footer-hint" id="footerHint">Syncing...</span>
   </div>
 </div>

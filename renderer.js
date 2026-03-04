@@ -48,7 +48,7 @@ function animateNumbers(from, to, key, duration) {
     var eased = 1 - Math.pow(1 - progress, 3);
     animatingPcts[key] = Math.round(from + (to - from) * eased);
     var el = document.getElementById(key + 'Pct');
-    if (el) el.textContent = animatingPcts[key] + '% used';
+    if (el) el.textContent = animatingPcts[key] + '%';
     if (progress < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -102,13 +102,9 @@ function renderUsageRow(container, data, key) {
   fill.style.width = Math.max(1, data.pct) + '%';
   track.appendChild(fill);
   barContainer.appendChild(track);
-  var pctEl = createElement('div', 'bar-pct', data.pct + '% used');
+  var pctEl = createElement('div', 'bar-pct', data.pct + '%');
   if (key) pctEl.id = key + 'Pct';
   barContainer.appendChild(pctEl);
-  if (key) {
-    var spark = buildSparklineSVG(key, data.pct);
-    if (spark) barContainer.appendChild(spark);
-  }
   container.appendChild(barContainer);
   if (data.resetsAt) {
     container.appendChild(createElement('div', 'reset-info', formatResetTime(data.resetsAt)));
@@ -207,11 +203,49 @@ window.electronAPI.onHistoryUpdate(function(data) {
   historyData = data;
 });
 
+var pendingWidgetUpdate = null;
+
 window.electronAPI.onUpdateAvailable(function(data) {
-  var banner = document.getElementById('updateBanner');
-  banner.textContent = 'v' + data.latestVersion + ' available';
-  banner.style.display = '';
-  banner.title = 'Click to open release page';
+  pendingWidgetUpdate = data;
+  var btn = document.getElementById('updateBtn');
+  btn.textContent = 'Update v' + data.latestVersion;
+  btn.classList.add('visible');
+});
+
+window.electronAPI.onUpdateProgress(function(pct) {
+  var btn = document.getElementById('updateBtn');
+  btn.textContent = pct + '% downloaded';
+});
+
+document.getElementById('updateBtn').addEventListener('click', function() {
+  if (!pendingWidgetUpdate) return;
+  var btn = document.getElementById('updateBtn');
+
+  if (!pendingWidgetUpdate.downloadUrl) {
+    btn.textContent = 'No installer found';
+    setTimeout(function() {
+      btn.textContent = 'Update v' + pendingWidgetUpdate.latestVersion;
+    }, 3000);
+    return;
+  }
+
+  btn.textContent = 'Downloading...';
+  btn.disabled = true;
+  btn.classList.add('downloading');
+
+  window.electronAPI.installUpdate(pendingWidgetUpdate.downloadUrl).then(function(result) {
+    if (result.success) {
+      btn.textContent = 'Installing...';
+      btn.classList.remove('downloading');
+    } else {
+      btn.textContent = 'Failed — retry';
+      btn.classList.remove('downloading');
+      setTimeout(function() {
+        btn.textContent = 'Update v' + pendingWidgetUpdate.latestVersion;
+        btn.disabled = false;
+      }, 3000);
+    }
+  });
 });
 
 document.getElementById('dashBtn').addEventListener('click', function() {
