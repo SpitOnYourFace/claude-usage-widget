@@ -45,7 +45,7 @@ const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 const ALERT_THRESHOLDS = { session: 80, weekAll: 90, weekSonnet: 90 };
 let trayHasAlert = false;
 
-const SYNC_TIMEOUT_MS = 30000; // force-reset syncing flag after 30s
+const SYNC_TIMEOUT_MS = 15000; // force-reset syncing flag after 15s
 
 // --- Paths (asar-safe) ---
 
@@ -557,6 +557,8 @@ function buildUsage(data) {
 }
 
 async function doSync() {
+  // Force-clear stale sync lock
+  resetSyncIfStale();
   if (win && !win.isDestroyed()) win.webContents.send('sync-start');
   try {
     const data = await fetchUsage();
@@ -704,6 +706,10 @@ function toggleWindow() {
     }
     win.show();
     win.focus();
+    // Immediately push cached data so UI is never empty
+    if (cachedUsage && !win.isDestroyed()) {
+      win.webContents.send('usage-update', cachedUsage);
+    }
     doSync();
     trayHasAlert = false;
     if (process.platform === 'win32' && win) win.setOverlayIcon(null, '');
@@ -713,6 +719,10 @@ function toggleWindow() {
 function openDashboard() {
   if (dashWin && !dashWin.isDestroyed()) {
     dashWin.focus();
+    // Refresh data when re-focusing existing dashboard
+    if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
+    if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
+    doSync();
     return;
   }
 
@@ -917,7 +927,7 @@ app.whenReady().then(() => {
 
   setInterval(() => {
     if (win && !win.isVisible()) doSync();
-  }, 60000);
+  }, 30000);
 
   startFileWatcher();
 
@@ -933,11 +943,11 @@ app.whenReady().then(() => {
   });
 
   powerMonitor.on('resume', () => {
-    // PC woke up — reset state and sync after a short delay (network may take a moment)
+    // PC woke up — reset state and sync immediately
     syncing = false;
     syncStartedAt = 0;
     activeRequest = null;
-    setTimeout(() => doSync(), 3000);
+    setTimeout(() => doSync(), 500);
   });
 
   // Check for updates on start, then every 24h
