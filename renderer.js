@@ -1,7 +1,5 @@
 var usageData = null;
-var prevPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
 var animatingPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
-var historyData = [];
 
 function createElement(tag, cls, text) {
   var el = document.createElement(tag);
@@ -54,44 +52,6 @@ function animateNumbers(from, to, key, duration) {
   requestAnimationFrame(step);
 }
 
-function buildSparklineSVG(key, pct) {
-  var cutoff = Date.now() - 86400000;
-  var points = [];
-  for (var i = 0; i < historyData.length; i++) {
-    if (historyData[i].ts > cutoff) {
-      points.push(historyData[i][key]);
-    }
-  }
-  if (points.length < 2) return null;
-
-  // Downsample to max 30 points
-  if (points.length > 30) {
-    var step = points.length / 30;
-    var sampled = [];
-    for (var j = 0; j < 30; j++) {
-      sampled.push(points[Math.floor(j * step)]);
-    }
-    points = sampled;
-  }
-
-  var w = 60, h = 14;
-  var maxVal = Math.max.apply(null, points.concat([1]));
-  var coords = [];
-  for (var k = 0; k < points.length; k++) {
-    var x = (k / (points.length - 1)) * w;
-    var y = h - (points[k] / Math.max(maxVal, 100)) * (h - 2) - 1;
-    coords.push(x.toFixed(1) + ',' + y.toFixed(1));
-  }
-
-  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-  svg.setAttribute('class', 'sparkline ' + getBarClass(pct));
-  var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-  polyline.setAttribute('points', coords.join(' '));
-  svg.appendChild(polyline);
-  return svg;
-}
-
 function renderUsageRow(container, data, key) {
   while (container.firstChild) container.removeChild(container.firstChild);
   if (!data) return;
@@ -125,6 +85,28 @@ function renderAll() {
     extra.textContent = 'Not enabled';
   }
 
+  updateTimers();
+}
+
+// Lightweight timer update — only changes text, no DOM rebuild
+function updateTimers() {
+  if (!usageData) return;
+
+  // Update countdown text for each row
+  var rows = [
+    { id: 'sessionRow', data: usageData.session },
+    { id: 'weekAllRow', data: usageData.weekAll },
+    { id: 'weekSonnetRow', data: usageData.weekSonnet },
+  ];
+  for (var i = 0; i < rows.length; i++) {
+    var resetEl = document.getElementById(rows[i].id)
+      .querySelector('.reset-info');
+    if (resetEl && rows[i].data.resetsAt) {
+      resetEl.textContent = formatResetTime(rows[i].data.resetsAt);
+    }
+  }
+
+  // Update "synced X ago"
   if (usageData.syncTime) {
     var ago = Math.round((Date.now() - usageData.syncTime) / 60000);
     document.getElementById('footerHint').textContent =
@@ -199,10 +181,6 @@ window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
 });
 
-window.electronAPI.onHistoryUpdate(function(data) {
-  historyData = data;
-});
-
 var pendingWidgetUpdate = null;
 
 window.electronAPI.onUpdateAvailable(function(data) {
@@ -252,11 +230,21 @@ document.getElementById('dashBtn').addEventListener('click', function() {
   window.electronAPI.openDashboard();
 });
 
+// Manual refresh button
+document.getElementById('refreshBtn').addEventListener('click', function() {
+  var btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  window.electronAPI.requestSync();
+  setTimeout(function() {
+    btn.classList.remove('spinning');
+  }, 1000);
+});
+
 // Request initial data
 window.electronAPI.requestSync();
 
-// Update countdown + "synced X ago" every second
+// Update countdown + "synced X ago" every second (lightweight, no DOM rebuild)
 setInterval(function() {
   if (!usageData) return;
-  renderAll();
+  updateTimers();
 }, 1000);

@@ -115,10 +115,24 @@
     border-top: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: center;
   }
+  .footer-left {
+    display: flex; align-items: center; gap: 8px;
+  }
   .footer-hint {
     font-size: 10px; color: var(--text-dim);
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   }
+  .refresh-btn {
+    width: 16px; height: 16px; border: none; border-radius: 50%;
+    background: var(--surface2); color: var(--text-dim);
+    cursor: pointer; -webkit-app-region: no-drag;
+    font-size: 11px; display: flex; align-items: center;
+    justify-content: center; transition: all 0.2s;
+    padding: 0;
+  }
+  .refresh-btn:hover { background: var(--border); color: var(--text); }
+  .refresh-btn.spinning { animation: spin 0.8s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .footer-update-btn {
     display: none;
     padding: 4px 12px;
@@ -166,7 +180,6 @@
   body.compact .usage-row { margin-bottom: 8px; }
   body.compact .widget { padding: 12px 16px; }
   body.compact .header { margin-bottom: 12px; }
-  body.compact .sparkline { display: none; }
 </style>
 </head>
 <body>
@@ -198,7 +211,10 @@
 
   <div class="footer">
     <button class="footer-update-btn" id="updateBtn"></button>
-    <span class="footer-hint" id="footerHint">Syncing...</span>
+    <div class="footer-left">
+      <button class="refresh-btn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
+      <span class="footer-hint" id="footerHint">Syncing...</span>
+    </div>
   </div>
 </div>
 

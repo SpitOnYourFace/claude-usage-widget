@@ -250,7 +250,6 @@ function renderPlanner() {
       rec.textContent += 'Resets in ' + rH + 'h ' + rM + 'm.';
     }
   } else {
-    var safeHours = ratePerHour > 0 ? Math.floor(remainingPct / ratePerHour) : 0;
     rec.textContent = 'You can sustain this pace until reset. ~' + Math.round(remainingPct) + '% headroom remaining.';
   }
   container.appendChild(rec);
@@ -783,7 +782,7 @@ window.dashboardAPI.onUpdateAvailable(function(data) {
   btn.textContent = 'Update to v' + data.latestVersion;
   btn.classList.add('visible');
   var ver = document.getElementById('sidebarVersion');
-  ver.textContent = 'v2.0.0 — update available';
+  ver.textContent = 'v' + currentAppVersion + ' — update available';
 });
 
 window.dashboardAPI.onUpdateProgress(function(pct) {

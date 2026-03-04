@@ -358,6 +358,19 @@ function downloadAndInstallUpdate(downloadUrl) {
         // Follow redirects (GitHub uses 302)
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume(); // drain the response
+          // Validate redirect host
+          try {
+            const redirectUrl = new URL(res.headers.location);
+            const allowedHosts = ['github.com', 'objects.githubusercontent.com',
+              'github-releases.githubusercontent.com', 'github-production-release-asset-2e65be.s3.amazonaws.com'];
+            if (redirectUrl.protocol !== 'https:' || !allowedHosts.some((h) => redirectUrl.hostname.endsWith(h))) {
+              reject(new Error('Redirect to untrusted host: ' + redirectUrl.hostname));
+              return;
+            }
+          } catch {
+            reject(new Error('Invalid redirect URL'));
+            return;
+          }
           doDownload(res.headers.location, redirects + 1);
           return;
         }
@@ -383,6 +396,15 @@ function downloadAndInstallUpdate(downloadUrl) {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
+          // Verify download size matches Content-Length
+          if (totalBytes > 0) {
+            const stat = fs.statSync(dest);
+            if (stat.size !== totalBytes) {
+              fs.unlink(dest, () => {});
+              reject(new Error('Download size mismatch: expected ' + totalBytes + ', got ' + stat.size));
+              return;
+            }
+          }
           sendProgress(100);
           resolve(dest);
         });
@@ -873,11 +895,21 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('dashboard-save-settings', (_, settings) => {
-    if (settings.alertThresholds) {
+    if (!settings || typeof settings !== 'object') return;
+    if (settings.alertThresholds && typeof settings.alertThresholds === 'object') {
       const t = settings.alertThresholds;
-      if (t.session) ALERT_THRESHOLDS.session = t.session.value;
-      if (t.weekAll) ALERT_THRESHOLDS.weekAll = t.weekAll.value;
-      if (t.weekSonnet) ALERT_THRESHOLDS.weekSonnet = t.weekSonnet.value;
+      const clampThreshold = (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return null;
+        return Math.min(100, Math.max(5, Math.round(n)));
+      };
+      const keys = ['session', 'weekAll', 'weekSonnet'];
+      for (const key of keys) {
+        if (t[key] && typeof t[key] === 'object') {
+          const val = clampThreshold(t[key].value);
+          if (val !== null) ALERT_THRESHOLDS[key] = val;
+        }
+      }
     }
     saveSettings();
   });
@@ -923,6 +955,20 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('download-and-install-update', async (_e, downloadUrl) => {
+    // Validate URL — only allow GitHub releases
+    try {
+      const parsed = new URL(downloadUrl);
+      const allowedHosts = ['github.com', 'objects.githubusercontent.com'];
+      if (!allowedHosts.includes(parsed.hostname)) {
+        return { success: false, error: 'Untrusted download host' };
+      }
+      if (parsed.protocol !== 'https:') {
+        return { success: false, error: 'HTTPS required' };
+      }
+    } catch {
+      return { success: false, error: 'Invalid download URL' };
+    }
+
     try {
       const installerPath = await downloadAndInstallUpdate(downloadUrl);
       // Launch installer detached, then quit

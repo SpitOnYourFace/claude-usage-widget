@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 let usageHandler = null;
 let syncStartHandler = null;
 let syncErrorHandler = null;
+let updateHandler = null;
+let progressHandler = null;
 
 contextBridge.exposeInMainWorld('electronAPI', {
   requestSync: () => ipcRenderer.send('request-sync'),
@@ -23,18 +25,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncErrorHandler = (_e, msg) => cb(msg);
     ipcRenderer.on('sync-error', syncErrorHandler);
   },
-  onHistoryUpdate: (cb) => {
-    let handler = null;
-    if (handler) ipcRenderer.removeListener('history-update', handler);
-    handler = (_e, data) => cb(data);
-    ipcRenderer.on('history-update', handler);
-  },
   onUpdateAvailable: (cb) => {
-    let handler = null;
-    if (handler) ipcRenderer.removeListener('update-available', handler);
-    handler = (_e, data) => cb(data);
-    ipcRenderer.on('update-available', handler);
+    if (updateHandler) ipcRenderer.removeListener('update-available', updateHandler);
+    updateHandler = (_e, data) => cb(data);
+    ipcRenderer.on('update-available', updateHandler);
   },
+  onUpdateProgress: (cb) => {
+    if (progressHandler) ipcRenderer.removeListener('update-progress', progressHandler);
+    progressHandler = (_e, pct) => cb(pct);
+    ipcRenderer.on('update-progress', progressHandler);
+  },
+  installUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
   toggleCompact: (isCompact) => ipcRenderer.send('toggle-compact', isCompact),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
 });
