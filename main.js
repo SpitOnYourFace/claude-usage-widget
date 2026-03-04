@@ -39,6 +39,7 @@ let usageHistory = [];
 let lastAlertTimes = { session: 0, weekAll: 0, weekSonnet: 0 };
 const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 const ALERT_THRESHOLDS = { session: 80, weekAll: 90, weekSonnet: 90 };
+let trayHasAlert = false;
 
 const SYNC_TIMEOUT_MS = 30000; // force-reset syncing flag after 30s
 
@@ -185,6 +186,32 @@ function checkAndNotify(usage) {
         if (win && !win.isVisible()) toggleWindow();
       });
       notif.show();
+    }
+  }
+}
+
+function updateTrayBadge(usage) {
+  if (!tray) return;
+  const hasAlert = usage.session.pct >= ALERT_THRESHOLDS.session
+    || usage.weekAll.pct >= ALERT_THRESHOLDS.weekAll
+    || usage.weekSonnet.pct >= ALERT_THRESHOLDS.weekSonnet;
+
+  if (hasAlert !== trayHasAlert) {
+    trayHasAlert = hasAlert;
+    if (hasAlert) {
+      const dotSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+        <circle cx="12" cy="4" r="3.5" fill="#f87171"/>
+      </svg>`;
+      const dotImage = nativeImage.createFromDataURL(
+        'data:image/svg+xml;base64,' + Buffer.from(dotSvg).toString('base64')
+      );
+      if (process.platform === 'win32' && win) {
+        win.setOverlayIcon(dotImage, 'Usage alert');
+      }
+    } else {
+      if (process.platform === 'win32' && win) {
+        win.setOverlayIcon(null, '');
+      }
     }
   }
 }
@@ -349,6 +376,7 @@ async function doSync() {
       win.webContents.send('history-update', usageHistory);
     }
     checkAndNotify(cachedUsage);
+    updateTrayBadge(cachedUsage);
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
     updateTrayTooltip();
   } catch (err) {
@@ -481,6 +509,8 @@ function toggleWindow() {
     win.show();
     win.focus();
     doSync();
+    trayHasAlert = false;
+    if (process.platform === 'win32' && win) win.setOverlayIcon(null, '');
   }
 }
 
