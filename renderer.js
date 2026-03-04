@@ -1,4 +1,6 @@
 var usageData = null;
+var prevPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
+var animatingPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
 
 function createElement(tag, cls, text) {
   var el = document.createElement(tag);
@@ -36,7 +38,22 @@ function getBarClass(pct) {
   return '';
 }
 
-function renderUsageRow(container, data) {
+function animateNumbers(from, to, key, duration) {
+  var start = performance.now();
+  function step(now) {
+    var elapsed = now - start;
+    var progress = Math.min(elapsed / duration, 1);
+    // Ease out cubic
+    var eased = 1 - Math.pow(1 - progress, 3);
+    animatingPcts[key] = Math.round(from + (to - from) * eased);
+    var el = document.getElementById(key + 'Pct');
+    if (el) el.textContent = animatingPcts[key] + '% used';
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function renderUsageRow(container, data, key) {
   while (container.firstChild) container.removeChild(container.firstChild);
   if (!data) return;
   container.appendChild(createElement('div', 'usage-label', data.label));
@@ -46,7 +63,9 @@ function renderUsageRow(container, data) {
   fill.style.width = Math.max(1, data.pct) + '%';
   track.appendChild(fill);
   barContainer.appendChild(track);
-  barContainer.appendChild(createElement('div', 'bar-pct', data.pct + '% used'));
+  var pctEl = createElement('div', 'bar-pct', data.pct + '% used');
+  if (key) pctEl.id = key + 'Pct';
+  barContainer.appendChild(pctEl);
   container.appendChild(barContainer);
   if (data.resetsAt) {
     container.appendChild(createElement('div', 'reset-info', formatResetTime(data.resetsAt)));
@@ -55,9 +74,9 @@ function renderUsageRow(container, data) {
 
 function renderAll() {
   if (!usageData) return;
-  renderUsageRow(document.getElementById('sessionRow'), usageData.session);
-  renderUsageRow(document.getElementById('weekAllRow'), usageData.weekAll);
-  renderUsageRow(document.getElementById('weekSonnetRow'), usageData.weekSonnet);
+  renderUsageRow(document.getElementById('sessionRow'), usageData.session, 'session');
+  renderUsageRow(document.getElementById('weekAllRow'), usageData.weekAll, 'weekAll');
+  renderUsageRow(document.getElementById('weekSonnetRow'), usageData.weekSonnet, 'weekSonnet');
 
   var extra = document.getElementById('extraInfo');
   if (usageData.extraUsage && usageData.extraUsage.enabled) {
@@ -108,9 +127,23 @@ document.getElementById('closeBtn').addEventListener('click', function() {
 
 // Listen for usage updates from main process
 window.electronAPI.onUsageUpdate(function(data) {
+  var oldData = usageData;
   usageData = data;
   renderAll();
   setSyncStatus('live');
+
+  // Animate percentage changes
+  if (oldData) {
+    var keys = ['session', 'weekAll', 'weekSonnet'];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var oldPct = oldData[k] ? oldData[k].pct : 0;
+      var newPct = data[k] ? data[k].pct : 0;
+      if (oldPct !== newPct) {
+        animateNumbers(oldPct, newPct, k, 600);
+      }
+    }
+  }
 });
 
 window.electronAPI.onSyncStart(function() {
