@@ -318,15 +318,16 @@ function drawChart() {
   var maxTs = points[points.length - 1].ts;
   var tsRange = maxTs - minTs || 1;
 
-  // X-axis date labels
+  // X-axis date/time labels
   var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   function getXTicks() {
     var ticks = [];
-    var startDate = new Date(minTs);
-    startDate.setHours(0, 0, 0, 0);
-    var endDate = new Date(maxTs);
+    // Use the full chart range (cutoff to now) for even tick distribution
+    var rangeStart = new Date(minTs);
+    var rangeEnd = new Date(maxTs);
+
     var stepDays;
     if (chartDays <= 7) {
       stepDays = 1;
@@ -335,8 +336,13 @@ function drawChart() {
     } else {
       stepDays = 7;
     }
-    var d = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // start from next day
-    while (d.getTime() <= endDate.getTime()) {
+
+    // Start from midnight of the first day after range start
+    var d = new Date(rangeStart);
+    d.setHours(0, 0, 0, 0);
+    d = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+
+    while (d.getTime() <= rangeEnd.getTime()) {
       var label;
       if (chartDays <= 7) {
         label = dayNames[d.getDay()];
@@ -346,6 +352,16 @@ function drawChart() {
       ticks.push({ ts: d.getTime(), label: label });
       d = new Date(d.getTime() + stepDays * 24 * 60 * 60 * 1000);
     }
+
+    // Always add "Now" label at the end if there's room
+    if (ticks.length === 0 || (maxTs - ticks[ticks.length - 1].ts) > 3600000) {
+      var now = new Date(maxTs);
+      var h = now.getHours();
+      var ampm = h >= 12 ? 'pm' : 'am';
+      var h12 = h % 12 || 12;
+      ticks.push({ ts: maxTs, label: 'Now' });
+    }
+
     return ticks;
   }
 
@@ -358,8 +374,8 @@ function drawChart() {
 
   for (var t = 0; t < xTicks.length; t++) {
     var tx = padL + ((xTicks[t].ts - minTs) / tsRange) * chartW;
-    // Only draw if within chart bounds
-    if (tx >= padL && tx <= padL + chartW) {
+    // Only draw if within chart bounds with margin
+    if (tx >= padL + 10 && tx <= padL + chartW - 10) {
       // Tick mark
       ctx.beginPath();
       ctx.moveTo(tx, padT + chartH);
@@ -494,7 +510,7 @@ function renderAlerts() {
           alertThresholds[alert.key] = val - 5;
           valueEl.textContent = alertThresholds[alert.key] + '%';
           saveAlertThresholds();
-          renderAlerts();
+          updatePresetHighlights();
         }
       });
 
@@ -504,7 +520,7 @@ function renderAlerts() {
           alertThresholds[alert.key] = val + 5;
           valueEl.textContent = alertThresholds[alert.key] + '%';
           saveAlertThresholds();
-          renderAlerts();
+          updatePresetHighlights();
         }
       });
 
@@ -514,6 +530,28 @@ function renderAlerts() {
       row.appendChild(controls);
       container.appendChild(row);
     })(alerts[i]);
+  }
+}
+
+function updatePresetHighlights() {
+  var presets = [
+    { session: 60, weekAll: 60, weekSonnet: 60 },
+    { session: 80, weekAll: 90, weekSonnet: 90 },
+    { session: 95, weekAll: 95, weekSonnet: 95 },
+  ];
+  var chips = document.querySelectorAll('.preset-chip');
+  for (var i = 0; i < chips.length; i++) {
+    if (i < presets.length) {
+      var p = presets[i];
+      var match = alertThresholds.session === p.session
+        && alertThresholds.weekAll === p.weekAll
+        && alertThresholds.weekSonnet === p.weekSonnet;
+      if (match) {
+        chips[i].classList.add('active');
+      } else {
+        chips[i].classList.remove('active');
+      }
+    }
   }
 }
 
@@ -531,6 +569,7 @@ function saveAlertThresholds() {
 
 var currentDisplayHotkey = 'Ctrl+\\';
 var isRecordingHotkey = false;
+var currentAppVersion = '2.0.0';
 
 function formatElectronAccelerator(e) {
   var parts = [];
@@ -660,24 +699,38 @@ function renderSettings() {
   // Check for updates
   var updateRow = el('div', 'setting-row');
   updateRow.appendChild(el('div', 'setting-label', 'Updates'));
+  var updateMeta = el('div', 'setting-value', 'Current version: v' + currentAppVersion);
+  updateRow.appendChild(updateMeta);
   var updateBtn = el('button', 'update-btn', 'Check for Updates');
   updateBtn.addEventListener('click', function() {
     updateBtn.textContent = 'Checking...';
     updateBtn.disabled = true;
+    updateBtn.style.background = '';
+    updateBtn.style.borderColor = '';
     window.dashboardAPI.checkForUpdates().then(function(result) {
       var banner = document.getElementById('updateBanner');
-      if (result && result.updateAvailable) {
+      if (result && result.hasUpdate) {
         while (banner.firstChild) banner.removeChild(banner.firstChild);
         banner.appendChild(document.createTextNode(
-          'Update available: v' + result.version
+          'Update available: v' + result.latestVersion
         ));
         banner.classList.add('visible');
+        updateBtn.textContent = 'Update available: v' + result.latestVersion;
+        updateBtn.disabled = false;
       } else {
         updateBtn.textContent = 'Up to date';
+        updateBtn.style.background = 'var(--green)';
+        updateBtn.style.borderColor = 'var(--green)';
+        updateBtn.disabled = true;
+        setTimeout(function() {
+          updateBtn.textContent = 'Check for Updates';
+          updateBtn.style.background = '';
+          updateBtn.style.borderColor = '';
+          updateBtn.disabled = false;
+        }, 5000);
       }
     }).catch(function() {
       updateBtn.textContent = 'Check failed';
-    }).finally(function() {
       setTimeout(function() {
         updateBtn.textContent = 'Check for Updates';
         updateBtn.disabled = false;
@@ -689,7 +742,7 @@ function renderSettings() {
 
   // Version info
   var versionEl = document.getElementById('versionInfo');
-  versionEl.textContent = 'Claude Meter — Dashboard';
+  versionEl.textContent = 'Claude Meter v' + currentAppVersion;
 }
 
 // --- IPC handlers ---
@@ -781,6 +834,7 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
 window.dashboardAPI.getSettings().then(function(settings) {
   if (settings) {
     if (settings.hotkey) currentDisplayHotkey = settings.hotkey;
+    if (settings.version) currentAppVersion = settings.version;
     if (settings.alertThresholds) {
       if (typeof settings.alertThresholds.session === 'number') {
         alertThresholds.session = settings.alertThresholds.session;
@@ -801,11 +855,17 @@ window.dashboardAPI.getSettings().then(function(settings) {
 });
 window.dashboardAPI.requestData();
 
-// Update countdowns every second
+// Sync status indicators
+window.dashboardAPI.onSyncError(function(msg) {
+  // If we have cached data, keep showing it — don't clear to 0
+  if (usageData) renderOverview();
+});
+
+// Update countdowns every 10 seconds (not every 1s — reduces DOM thrashing)
 setInterval(function() {
   if (!usageData) return;
   renderOverview();
-}, 1000);
+}, 10000);
 
 // Redraw chart on window resize
 window.addEventListener('resize', function() {

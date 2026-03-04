@@ -556,25 +556,48 @@ function buildUsage(data) {
   return usage;
 }
 
+function broadcastUsage() {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('usage-update', cachedUsage);
+    win.webContents.send('history-update', usageHistory);
+  }
+  if (dashWin && !dashWin.isDestroyed()) {
+    dashWin.webContents.send('usage-update', cachedUsage);
+    dashWin.webContents.send('history-update', usageHistory);
+  }
+}
+
 async function doSync() {
   // Force-clear stale sync lock
   resetSyncIfStale();
   if (win && !win.isDestroyed()) win.webContents.send('sync-start');
+  if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-start');
   try {
     const data = await fetchUsage();
-    cachedUsage = buildUsage(data);
+    const newUsage = buildUsage(data);
+
+    // Guard: don't overwrite good cached data with all-zero response
+    const allZero = newUsage.session.pct === 0
+      && newUsage.weekAll.pct === 0
+      && newUsage.weekSonnet.pct === 0;
+    if (allZero && cachedUsage
+      && (cachedUsage.session.pct > 0 || cachedUsage.weekAll.pct > 0 || cachedUsage.weekSonnet.pct > 0)) {
+      // Check if reset times exist — if they do, the data is genuinely 0 (post-reset)
+      const hasResetTimes = newUsage.session.resetsAt || newUsage.weekAll.resetsAt || newUsage.weekSonnet.resetsAt;
+      if (!hasResetTimes) {
+        // Likely bad response — keep cached data, don't save zeros
+        broadcastUsage();
+        updateTrayTooltip();
+        return;
+      }
+    }
+
+    cachedUsage = newUsage;
     saveCachedUsage(cachedUsage);
     appendHistory(cachedUsage);
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('history-update', usageHistory);
-    }
     checkAndNotify(cachedUsage);
     updateTrayBadge(cachedUsage);
-    if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
-    if (dashWin && !dashWin.isDestroyed()) {
-      dashWin.webContents.send('usage-update', cachedUsage);
-      dashWin.webContents.send('history-update', usageHistory);
-    }
+    broadcastUsage();
     updateTrayTooltip();
   } catch (err) {
     // Truncate error — may contain untrusted content from API response
@@ -582,6 +605,9 @@ async function doSync() {
       ? err.message.slice(0, 200)
       : 'Unknown error';
     if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
+    if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
+    // Still broadcast cached data so UI isn't empty
+    if (cachedUsage) broadcastUsage();
   }
 }
 
@@ -883,6 +909,7 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', async () => {
     return {
       hotkey: currentHotkey,
+      version: app.getVersion(),
       alertThresholds: {
         session: ALERT_THRESHOLDS.session,
         weekAll: ALERT_THRESHOLDS.weekAll,

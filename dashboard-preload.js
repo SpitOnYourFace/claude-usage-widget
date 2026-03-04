@@ -4,6 +4,8 @@ let usageHandler = null;
 let historyHandler = null;
 let updateHandler = null;
 let progressHandler = null;
+let syncStartHandler = null;
+let syncErrorHandler = null;
 
 contextBridge.exposeInMainWorld('dashboardAPI', {
   minimize: () => ipcRenderer.send('dash-minimize'),
@@ -34,5 +36,15 @@ contextBridge.exposeInMainWorld('dashboardAPI', {
     if (progressHandler) ipcRenderer.removeListener('update-progress', progressHandler);
     progressHandler = (_e, pct) => cb(pct);
     ipcRenderer.on('update-progress', progressHandler);
+  },
+  onSyncStart: (cb) => {
+    if (syncStartHandler) ipcRenderer.removeListener('sync-start', syncStartHandler);
+    syncStartHandler = (_e) => cb();
+    ipcRenderer.on('sync-start', syncStartHandler);
+  },
+  onSyncError: (cb) => {
+    if (syncErrorHandler) ipcRenderer.removeListener('sync-error', syncErrorHandler);
+    syncErrorHandler = (_e, msg) => cb(msg);
+    ipcRenderer.on('sync-error', syncErrorHandler);
   },
 });
