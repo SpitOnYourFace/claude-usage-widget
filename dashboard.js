@@ -119,10 +119,33 @@ function renderOverview() {
   renderPlanner();
 }
 
+function getPlannerStatus(pct, hoursToLimit, remainingHours) {
+  // "At Risk" if burn rate will hit limit before reset
+  // "Watch" if above 60% usage
+  // "On Track" otherwise
+  if (hoursToLimit !== null && hoursToLimit < remainingHours) return 'at-risk';
+  if (pct >= 60) return 'watch';
+  return 'on-track';
+}
+
+function getPlannerStatusLabel(status) {
+  if (status === 'at-risk') return 'At Risk';
+  if (status === 'watch') return 'Watch';
+  return 'On Track';
+}
+
+function getStatDotColor(pct) {
+  if (pct >= 85) return 'var(--red)';
+  if (pct >= 60) return 'var(--yellow)';
+  return 'var(--green)';
+}
+
 function renderPlanner() {
-  var plannerText = document.getElementById('plannerText');
+  var container = document.getElementById('plannerText');
+  while (container.firstChild) container.removeChild(container.firstChild);
+
   if (!usageData || !usageData.session) {
-    plannerText.textContent = 'Waiting for data...';
+    container.textContent = 'Waiting for data...';
     return;
   }
 
@@ -130,48 +153,107 @@ function renderPlanner() {
   var resetsAt = usageData.session.resetsAt;
 
   if (pct === 0) {
-    plannerText.textContent = 'No session usage yet. You have a full 5-hour window available.';
+    // Simple state — show badge + message
+    var header0 = el('div', 'planner-header');
+    var badge0 = el('div', 'planner-badge on-track');
+    badge0.appendChild(el('span', 'planner-badge-dot'));
+    badge0.appendChild(document.createTextNode('On Track'));
+    header0.appendChild(badge0);
+    container.appendChild(header0);
+    container.appendChild(el('div', 'planner-recommendation', 'No session usage yet. You have a full 5-hour window available.'));
     return;
   }
 
-  if (!resetsAt) {
-    plannerText.textContent = 'Session at ' + pct + '% — reset time unknown.';
-    return;
-  }
-
-  var resetTime = new Date(resetsAt).getTime();
+  var resetTime = resetsAt ? new Date(resetsAt).getTime() : 0;
   var now = Date.now();
-  var remainingMs = resetTime - now;
+  var remainingMs = resetTime > 0 ? resetTime - now : 0;
 
-  if (remainingMs <= 0) {
-    plannerText.textContent = 'Session is resetting now.';
+  if (resetsAt && remainingMs <= 0) {
+    var header1 = el('div', 'planner-header');
+    var badge1 = el('div', 'planner-badge on-track');
+    badge1.appendChild(el('span', 'planner-badge-dot'));
+    badge1.appendChild(document.createTextNode('On Track'));
+    header1.appendChild(badge1);
+    container.appendChild(header1);
+    container.appendChild(el('div', 'planner-recommendation', 'Session is resetting now.'));
     return;
   }
 
-  var sessionWindowMs = 5 * 60 * 60 * 1000; // 5 hours
-  var elapsedMs = sessionWindowMs - remainingMs;
+  var sessionWindowMs = 5 * 60 * 60 * 1000;
+  var elapsedMs = remainingMs > 0 ? sessionWindowMs - remainingMs : 1;
   if (elapsedMs <= 0) elapsedMs = 1;
 
   var ratePerHour = pct / (elapsedMs / 3600000);
   var remainingPct = 100 - pct;
-  var hoursToLimit = remainingPct / ratePerHour;
+  var hoursToLimit = ratePerHour > 0 ? remainingPct / ratePerHour : null;
+  var remainingHoursDecimal = remainingMs > 0 ? remainingMs / 3600000 : 0;
 
-  var remainingHours = Math.floor(remainingMs / 3600000);
-  var remainingMins = Math.floor((remainingMs % 3600000) / 60000);
+  var status = getPlannerStatus(pct, hoursToLimit, remainingHoursDecimal);
 
-  var lines = [];
-  lines.push('Session at ' + pct + '% — resets in ' + remainingHours + 'h ' + remainingMins + 'm.');
-  lines.push('Current burn rate: ~' + ratePerHour.toFixed(1) + '% per hour.');
+  // Header with badge
+  var header = el('div', 'planner-header');
+  var badge = el('div', 'planner-badge ' + status);
+  badge.appendChild(el('span', 'planner-badge-dot'));
+  badge.appendChild(document.createTextNode(getPlannerStatusLabel(status)));
+  header.appendChild(badge);
+  container.appendChild(header);
 
-  if (hoursToLimit < (remainingMs / 3600000)) {
+  // Stat grid
+  var stats = el('div', 'planner-stats');
+
+  // Stat 1: Session usage
+  var stat1 = el('div', 'planner-stat');
+  stat1.appendChild(el('div', 'planner-stat-label', 'Session'));
+  var val1 = el('div', 'planner-stat-value');
+  var dot1 = el('span', 'planner-stat-dot');
+  dot1.style.background = getStatDotColor(pct);
+  val1.appendChild(dot1);
+  val1.appendChild(document.createTextNode(pct + '%'));
+  stat1.appendChild(val1);
+  stats.appendChild(stat1);
+
+  // Stat 2: Burn rate
+  var stat2 = el('div', 'planner-stat');
+  stat2.appendChild(el('div', 'planner-stat-label', 'Burn Rate'));
+  var val2 = el('div', 'planner-stat-value');
+  val2.appendChild(document.createTextNode('~' + ratePerHour.toFixed(1) + '%/hr'));
+  stat2.appendChild(val2);
+  stats.appendChild(stat2);
+
+  // Stat 3: Time to limit
+  var stat3 = el('div', 'planner-stat');
+  stat3.appendChild(el('div', 'planner-stat-label', 'Time to Limit'));
+  var val3 = el('div', 'planner-stat-value');
+  if (hoursToLimit !== null && hoursToLimit < remainingHoursDecimal) {
     var limitH = Math.floor(hoursToLimit);
     var limitM = Math.round((hoursToLimit - limitH) * 60);
-    lines.push('At this rate, you will hit the limit in ~' + limitH + 'h ' + limitM + 'm.');
+    val3.style.color = 'var(--red)';
+    val3.appendChild(document.createTextNode(limitH + 'h ' + limitM + 'm'));
   } else {
-    lines.push('At this rate, you will NOT hit the limit before reset.');
+    val3.style.color = 'var(--green)';
+    val3.appendChild(document.createTextNode('Safe'));
   }
+  stat3.appendChild(val3);
+  stats.appendChild(stat3);
 
-  plannerText.textContent = lines.join(' ');
+  container.appendChild(stats);
+
+  // Recommendation
+  var rec = el('div', 'planner-recommendation');
+  if (hoursToLimit !== null && hoursToLimit < remainingHoursDecimal) {
+    var lH = Math.floor(hoursToLimit);
+    var lM = Math.round((hoursToLimit - lH) * 60);
+    rec.textContent = 'Slow down \u2014 limit in ' + lH + 'h ' + lM + 'm. ';
+    if (remainingMs > 0) {
+      var rH = Math.floor(remainingMs / 3600000);
+      var rM = Math.floor((remainingMs % 3600000) / 60000);
+      rec.textContent += 'Resets in ' + rH + 'h ' + rM + 'm.';
+    }
+  } else {
+    var safeHours = ratePerHour > 0 ? Math.floor(remainingPct / ratePerHour) : 0;
+    rec.textContent = 'You can sustain this pace until reset. ~' + Math.round(remainingPct) + '% headroom remaining.';
+  }
+  container.appendChild(rec);
 }
 
 // --- History chart ---
@@ -202,7 +284,7 @@ function drawChart() {
     }
   }
 
-  var padL = 40, padR = 16, padT = 16, padB = 40;
+  var padL = 40, padR = 16, padT = 16, padB = 50;
   var chartW = w - padL - padR;
   var chartH = h - padT - padB;
 
@@ -235,6 +317,58 @@ function drawChart() {
   var minTs = points[0].ts;
   var maxTs = points[points.length - 1].ts;
   var tsRange = maxTs - minTs || 1;
+
+  // X-axis date labels
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function getXTicks() {
+    var ticks = [];
+    var startDate = new Date(minTs);
+    startDate.setHours(0, 0, 0, 0);
+    var endDate = new Date(maxTs);
+    var stepDays;
+    if (chartDays <= 7) {
+      stepDays = 1;
+    } else if (chartDays <= 14) {
+      stepDays = 2;
+    } else {
+      stepDays = 7;
+    }
+    var d = new Date(startDate.getTime() + 24 * 60 * 60 * 1000); // start from next day
+    while (d.getTime() <= endDate.getTime()) {
+      var label;
+      if (chartDays <= 7) {
+        label = dayNames[d.getDay()];
+      } else {
+        label = monthNames[d.getMonth()] + ' ' + d.getDate();
+      }
+      ticks.push({ ts: d.getTime(), label: label });
+      d = new Date(d.getTime() + stepDays * 24 * 60 * 60 * 1000);
+    }
+    return ticks;
+  }
+
+  var xTicks = getXTicks();
+  ctx.fillStyle = '#7e7e98';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = '#2a2a3d';
+  ctx.lineWidth = 1;
+
+  for (var t = 0; t < xTicks.length; t++) {
+    var tx = padL + ((xTicks[t].ts - minTs) / tsRange) * chartW;
+    // Only draw if within chart bounds
+    if (tx >= padL && tx <= padL + chartW) {
+      // Tick mark
+      ctx.beginPath();
+      ctx.moveTo(tx, padT + chartH);
+      ctx.lineTo(tx, padT + chartH + 4);
+      ctx.stroke();
+      // Label
+      ctx.fillText(xTicks[t].label, tx, padT + chartH + 16);
+    }
+  }
 
   function toX(ts) {
     return padL + ((ts - minTs) / tsRange) * chartW;
@@ -269,7 +403,7 @@ function drawChart() {
   }
 
   // Legend
-  var legendY = h - 12;
+  var legendY = h - 6;
   var legendX = padL;
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'left';
@@ -304,6 +438,39 @@ function renderAlerts() {
   var container = document.getElementById('alertRows');
   while (container.firstChild) container.removeChild(container.firstChild);
 
+  // Preset buttons
+  var presets = [
+    { label: 'Conservative 60%', session: 60, weekAll: 60, weekSonnet: 60 },
+    { label: 'Standard 80%', session: 80, weekAll: 90, weekSonnet: 90 },
+    { label: 'Aggressive 95%', session: 95, weekAll: 95, weekSonnet: 95 },
+  ];
+
+  var presetsRow = el('div', 'alert-presets');
+
+  function isPresetActive(preset) {
+    return alertThresholds.session === preset.session
+      && alertThresholds.weekAll === preset.weekAll
+      && alertThresholds.weekSonnet === preset.weekSonnet;
+  }
+
+  for (var p = 0; p < presets.length; p++) {
+    (function(preset) {
+      var chip = el('button', 'preset-chip', preset.label);
+      if (isPresetActive(preset)) chip.classList.add('active');
+      chip.addEventListener('click', function() {
+        alertThresholds.session = preset.session;
+        alertThresholds.weekAll = preset.weekAll;
+        alertThresholds.weekSonnet = preset.weekSonnet;
+        saveAlertThresholds();
+        renderAlerts();
+      });
+      presetsRow.appendChild(chip);
+    })(presets[p]);
+  }
+
+  container.appendChild(presetsRow);
+
+  // Per-metric fine-tuning rows
   var alerts = [
     { key: 'session', label: 'Session usage alert' },
     { key: 'weekAll', label: 'Weekly (all models) alert' },
@@ -327,6 +494,7 @@ function renderAlerts() {
           alertThresholds[alert.key] = val - 5;
           valueEl.textContent = alertThresholds[alert.key] + '%';
           saveAlertThresholds();
+          renderAlerts();
         }
       });
 
@@ -336,6 +504,7 @@ function renderAlerts() {
           alertThresholds[alert.key] = val + 5;
           valueEl.textContent = alertThresholds[alert.key] + '%';
           saveAlertThresholds();
+          renderAlerts();
         }
       });
 
@@ -360,6 +529,37 @@ function saveAlertThresholds() {
 
 // --- Settings ---
 
+var currentDisplayHotkey = 'Ctrl+\\';
+var isRecordingHotkey = false;
+
+function formatElectronAccelerator(e) {
+  var parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push('Super');
+
+  // Map key to Electron accelerator format
+  var key = e.key;
+  if (key === ' ') key = 'Space';
+  else if (key === 'Escape') return null; // cancel
+  else if (key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta') return null; // modifier only
+  else if (key === '\\') key = '\\';
+  else if (key === 'ArrowUp') key = 'Up';
+  else if (key === 'ArrowDown') key = 'Down';
+  else if (key === 'ArrowLeft') key = 'Left';
+  else if (key === 'ArrowRight') key = 'Right';
+  else if (key === 'Delete') key = 'Delete';
+  else if (key === 'Backspace') key = 'Backspace';
+  else if (key === 'Enter') key = 'Return';
+  else if (key === 'Tab') key = 'Tab';
+  else if (key.length === 1) key = key.toUpperCase();
+
+  if (parts.length === 0) return null; // require at least one modifier
+  parts.push(key);
+  return parts.join('+');
+}
+
 function renderSettings() {
   var container = document.getElementById('settingRows');
   while (container.firstChild) container.removeChild(container.firstChild);
@@ -367,7 +567,88 @@ function renderSettings() {
   // Hotkey setting
   var hotkeyRow = el('div', 'setting-row');
   hotkeyRow.appendChild(el('div', 'setting-label', 'Toggle widget'));
-  hotkeyRow.appendChild(el('div', 'setting-value', 'Ctrl+\\'));
+
+  var hotkeyContainer = el('div', 'hotkey-container');
+  var hotkeyDisplay = el('div', 'hotkey-display', currentDisplayHotkey);
+  var changeBtn = el('button', 'hotkey-change-btn', 'Change');
+  var statusEl = el('div', 'hotkey-status');
+
+  var keydownHandler = null;
+
+  changeBtn.addEventListener('click', function() {
+    if (isRecordingHotkey) {
+      // Cancel
+      isRecordingHotkey = false;
+      hotkeyDisplay.classList.remove('recording');
+      hotkeyDisplay.textContent = currentDisplayHotkey;
+      changeBtn.textContent = 'Change';
+      if (keydownHandler) {
+        document.removeEventListener('keydown', keydownHandler, true);
+        keydownHandler = null;
+      }
+      return;
+    }
+
+    isRecordingHotkey = true;
+    hotkeyDisplay.classList.add('recording');
+    hotkeyDisplay.textContent = 'Press shortcut...';
+    changeBtn.textContent = 'Cancel';
+    statusEl.textContent = '';
+    statusEl.className = 'hotkey-status';
+
+    keydownHandler = function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        // Cancel recording
+        isRecordingHotkey = false;
+        hotkeyDisplay.classList.remove('recording');
+        hotkeyDisplay.textContent = currentDisplayHotkey;
+        changeBtn.textContent = 'Change';
+        document.removeEventListener('keydown', keydownHandler, true);
+        keydownHandler = null;
+        return;
+      }
+
+      var accelerator = formatElectronAccelerator(e);
+      if (!accelerator) return; // modifier-only press, wait for full combo
+
+      isRecordingHotkey = false;
+      hotkeyDisplay.classList.remove('recording');
+      hotkeyDisplay.textContent = accelerator;
+      changeBtn.textContent = 'Change';
+      document.removeEventListener('keydown', keydownHandler, true);
+      keydownHandler = null;
+
+      // Send to main process
+      statusEl.textContent = 'Registering...';
+      statusEl.className = 'hotkey-status';
+
+      window.dashboardAPI.changeHotkey(accelerator).then(function(result) {
+        if (result.success) {
+          currentDisplayHotkey = accelerator;
+          statusEl.textContent = 'Hotkey updated!';
+          statusEl.className = 'hotkey-status success';
+        } else {
+          hotkeyDisplay.textContent = currentDisplayHotkey;
+          statusEl.textContent = result.error || 'Failed to register';
+          statusEl.className = 'hotkey-status error';
+        }
+        setTimeout(function() {
+          statusEl.textContent = '';
+          statusEl.className = 'hotkey-status';
+        }, 3000);
+      });
+    };
+
+    document.addEventListener('keydown', keydownHandler, true);
+  });
+
+  hotkeyContainer.appendChild(hotkeyDisplay);
+  hotkeyContainer.appendChild(changeBtn);
+  hotkeyRow.appendChild(hotkeyContainer);
+  hotkeyRow.appendChild(statusEl);
   container.appendChild(hotkeyRow);
 
   // Auto-start setting
@@ -427,10 +708,97 @@ window.dashboardAPI.onHistoryUpdate(function(data) {
   }
 });
 
+// --- Title bar controls ---
+
+document.getElementById('tbMinimize').addEventListener('click', function() {
+  window.dashboardAPI.minimize();
+});
+document.getElementById('tbMaximize').addEventListener('click', function() {
+  window.dashboardAPI.maximize();
+});
+document.getElementById('tbClose').addEventListener('click', function() {
+  window.dashboardAPI.close();
+});
+
+// --- Update ---
+
+var pendingUpdate = null;
+
+window.dashboardAPI.onUpdateAvailable(function(data) {
+  pendingUpdate = data;
+  var btn = document.getElementById('updateNowBtn');
+  btn.textContent = 'Update to v' + data.latestVersion;
+  btn.classList.add('visible');
+  var ver = document.getElementById('sidebarVersion');
+  ver.textContent = 'v2.0.0 — update available';
+});
+
+window.dashboardAPI.onUpdateProgress(function(pct) {
+  var bar = document.getElementById('updateProgress');
+  var fill = document.getElementById('updateProgressFill');
+  var btn = document.getElementById('updateNowBtn');
+  bar.classList.add('visible');
+  fill.style.width = pct + '%';
+  btn.textContent = pct + '% downloaded';
+});
+
+document.getElementById('updateNowBtn').addEventListener('click', function() {
+  if (!pendingUpdate) return;
+  var btn = document.getElementById('updateNowBtn');
+
+  if (!pendingUpdate.downloadUrl) {
+    btn.textContent = 'No installer found';
+    setTimeout(function() {
+      btn.textContent = 'Update to v' + pendingUpdate.latestVersion;
+    }, 3000);
+    return;
+  }
+
+  btn.textContent = 'Downloading...';
+  btn.disabled = true;
+  btn.classList.add('downloading');
+  document.getElementById('updateProgress').classList.add('visible');
+
+  window.dashboardAPI.installUpdate(pendingUpdate.downloadUrl).then(function(result) {
+    if (result.success) {
+      btn.textContent = 'Installing...';
+      btn.classList.remove('downloading');
+    } else {
+      btn.textContent = 'Failed — retry';
+      btn.classList.remove('downloading');
+      document.getElementById('updateProgress').classList.remove('visible');
+      setTimeout(function() {
+        btn.textContent = 'Update to v' + pendingUpdate.latestVersion;
+        btn.disabled = false;
+      }, 3000);
+    }
+  });
+});
+
 // --- Init ---
 
-renderAlerts();
-renderSettings();
+// Load persisted settings before rendering
+window.dashboardAPI.getSettings().then(function(settings) {
+  if (settings) {
+    if (settings.hotkey) currentDisplayHotkey = settings.hotkey;
+    if (settings.alertThresholds) {
+      if (typeof settings.alertThresholds.session === 'number') {
+        alertThresholds.session = settings.alertThresholds.session;
+      }
+      if (typeof settings.alertThresholds.weekAll === 'number') {
+        alertThresholds.weekAll = settings.alertThresholds.weekAll;
+      }
+      if (typeof settings.alertThresholds.weekSonnet === 'number') {
+        alertThresholds.weekSonnet = settings.alertThresholds.weekSonnet;
+      }
+    }
+  }
+  renderAlerts();
+  renderSettings();
+}).catch(function() {
+  renderAlerts();
+  renderSettings();
+});
 window.dashboardAPI.requestData();
 
 // Update countdowns every second

@@ -29,7 +29,13 @@
     height: 100vh;
     overflow: hidden;
     display: flex;
+    flex-direction: column;
     user-select: none;
+  }
+  .body-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
   }
 
   /* --- Sidebar --- */
@@ -70,6 +76,74 @@
     color: var(--text);
     background: var(--surface2);
     border-left-color: var(--accent);
+  }
+  .sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+  }
+  .sidebar-version {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    margin-bottom: 8px;
+  }
+  .update-now-btn {
+    display: none;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #c06a3a);
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    text-align: center;
+    box-shadow: 0 0 10px rgba(212, 132, 90, 0.25);
+  }
+  .update-now-btn:hover {
+    box-shadow: 0 0 16px rgba(212, 132, 90, 0.45);
+    transform: translateY(-1px);
+  }
+  .update-now-btn:active { transform: translateY(0); }
+  .update-now-btn.visible {
+    display: block;
+  }
+  .update-now-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+  .update-now-btn.downloading {
+    background: var(--surface2);
+    border-color: var(--border);
+    box-shadow: none;
+    animation: pulse-dl 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-dl {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  .update-progress {
+    display: none;
+    margin-top: 6px;
+    height: 4px;
+    background: var(--bar-bg);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .update-progress.visible {
+    display: block;
+  }
+  .update-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
   }
 
   /* --- Main content --- */
@@ -154,6 +228,83 @@
     font-size: 13px;
     line-height: 1.5;
     color: var(--text);
+  }
+  .planner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .planner-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+  .planner-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .planner-badge.on-track {
+    background: rgba(74, 222, 128, 0.12);
+    color: var(--green);
+  }
+  .planner-badge.on-track .planner-badge-dot { background: var(--green); }
+  .planner-badge.watch {
+    background: rgba(250, 204, 21, 0.12);
+    color: var(--yellow);
+  }
+  .planner-badge.watch .planner-badge-dot { background: var(--yellow); }
+  .planner-badge.at-risk {
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--red);
+  }
+  .planner-badge.at-risk .planner-badge-dot { background: var(--red); }
+  .planner-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .planner-stat {
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .planner-stat-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .planner-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .planner-stat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .planner-recommendation {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
   }
 
   /* --- History tab --- */
@@ -247,6 +398,33 @@
     color: #fff;
   }
 
+  /* --- Alert presets --- */
+  .alert-presets {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .preset-chip {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .preset-chip:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
+  }
+  .preset-chip.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
   /* --- Settings tab --- */
   .setting-rows {
     display: flex;
@@ -269,6 +447,55 @@
     color: var(--text-dim);
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   }
+  .hotkey-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .hotkey-display {
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    min-width: 80px;
+    text-align: center;
+  }
+  .hotkey-display.recording {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: pulse-hotkey 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse-hotkey {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  .hotkey-change-btn {
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .hotkey-change-btn:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
+  }
+  .hotkey-status {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .hotkey-status.success { color: var(--green); }
+  .hotkey-status.error { color: var(--red); }
   .update-banner {
     background: var(--surface);
     border: 1px solid var(--accent);
@@ -303,6 +530,43 @@
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   }
 
+  /* --- Custom title bar --- */
+  .titlebar {
+    height: 36px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+  }
+  .titlebar-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.3px;
+  }
+  .titlebar-controls {
+    display: flex;
+    gap: 8px;
+    -webkit-app-region: no-drag;
+  }
+  .titlebar-btn {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .titlebar-btn:hover { opacity: 1; }
+  .titlebar-btn.tb-minimize { background: var(--yellow); }
+  .titlebar-btn.tb-maximize { background: var(--green); }
+  .titlebar-btn.tb-close { background: var(--red); }
+
   /* --- Scrollbar --- */
   .main::-webkit-scrollbar { width: 6px; }
   .main::-webkit-scrollbar-track { background: transparent; }
@@ -317,6 +581,16 @@
 </head>
 <body>
 
+<div class="titlebar">
+  <span class="titlebar-title">Claude Meter — Dashboard</span>
+  <div class="titlebar-controls">
+    <button class="titlebar-btn tb-minimize" id="tbMinimize" title="Minimize"></button>
+    <button class="titlebar-btn tb-maximize" id="tbMaximize" title="Maximize"></button>
+    <button class="titlebar-btn tb-close" id="tbClose" title="Close"></button>
+  </div>
+</div>
+
+<div class="body-content">
 <div class="sidebar">
   <div class="sidebar-title">Claude Meter</div>
   <ul class="sidebar-nav">
@@ -325,6 +599,13 @@
     <li data-tab="alerts">Alerts</li>
     <li data-tab="settings">Settings</li>
   </ul>
+  <div class="sidebar-footer">
+    <div class="sidebar-version" id="sidebarVersion">v2.0.0</div>
+    <button class="update-now-btn" id="updateNowBtn">Update Now</button>
+    <div class="update-progress" id="updateProgress">
+      <div class="update-progress-fill" id="updateProgressFill"></div>
+    </div>
+  </div>
 </div>
 
 <div class="main">
@@ -362,6 +643,7 @@
   </div>
 </div>
 
+</div>
 <script src="dashboard.js"></script>
 </body>
 </html>

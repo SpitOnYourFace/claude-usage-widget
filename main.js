@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
+const { spawn } = require('child_process');
 
 // --- Constants ---
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -21,10 +22,12 @@ const DATA_FILE = path.join(CLAUDE_DIR, 'usage-widget-data.json');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 const BOUNDS_FILE = path.join(CLAUDE_DIR, 'usage-widget-bounds.json');
 const HISTORY_FILE = path.join(CLAUDE_DIR, 'usage-widget-history.json');
+const SETTINGS_FILE = path.join(CLAUDE_DIR, 'usage-widget-settings.json');
 const HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const USAGE_API = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
-const HOTKEY = 'Ctrl+\\';
+const DEFAULT_HOTKEY = 'Ctrl+\\';
+let currentHotkey = DEFAULT_HOTKEY;
 
 let win = null;
 let tray = null;
@@ -147,6 +150,43 @@ function appendHistory(usage) {
   saveHistory();
 }
 
+// --- Settings persistence ---
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      if (data.hotkey && typeof data.hotkey === 'string') {
+        currentHotkey = data.hotkey;
+      }
+      if (data.alertThresholds) {
+        if (typeof data.alertThresholds.session === 'number') {
+          ALERT_THRESHOLDS.session = data.alertThresholds.session;
+        }
+        if (typeof data.alertThresholds.weekAll === 'number') {
+          ALERT_THRESHOLDS.weekAll = data.alertThresholds.weekAll;
+        }
+        if (typeof data.alertThresholds.weekSonnet === 'number') {
+          ALERT_THRESHOLDS.weekSonnet = data.alertThresholds.weekSonnet;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({
+      hotkey: currentHotkey,
+      alertThresholds: {
+        session: ALERT_THRESHOLDS.session,
+        weekAll: ALERT_THRESHOLDS.weekAll,
+        weekSonnet: ALERT_THRESHOLDS.weekSonnet,
+      },
+    }, null, 2));
+  } catch { /* ignore */ }
+}
+
 // --- Desktop notifications ---
 
 function checkAndNotify(usage) {
@@ -220,7 +260,18 @@ function updateTrayBadge(usage) {
 // --- Auto-update check ---
 
 let lastUpdateCheck = 0;
+let lastUpdateResult = null;
 const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
+function isNewerVersion(latest, current) {
+  const a = latest.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
+}
 
 function checkForUpdates() {
   return new Promise((resolve) => {
@@ -241,8 +292,21 @@ function checkForUpdates() {
           const data = JSON.parse(body);
           const latestTag = (data.tag_name || '').replace(/^v/, '');
           const current = app.getVersion();
-          if (latestTag && latestTag !== current) {
-            resolve({ hasUpdate: true, latestVersion: latestTag, url: data.html_url });
+          if (latestTag && isNewerVersion(latestTag, current)) {
+            // Find the Windows installer asset (.exe)
+            let downloadUrl = null;
+            if (Array.isArray(data.assets)) {
+              const exeAsset = data.assets.find((a) =>
+                /\.exe$/i.test(a.name) && /setup/i.test(a.name)
+              );
+              if (exeAsset) downloadUrl = exeAsset.browser_download_url;
+            }
+            resolve({
+              hasUpdate: true,
+              latestVersion: latestTag,
+              url: data.html_url,
+              downloadUrl,
+            });
           } else {
             resolve({ hasUpdate: false });
           }
@@ -254,6 +318,92 @@ function checkForUpdates() {
     req.on('error', () => resolve({ hasUpdate: false }));
     req.setTimeout(10000, () => { req.destroy(); resolve({ hasUpdate: false }); });
     req.end();
+  });
+}
+
+function downloadAndInstallUpdate(downloadUrl) {
+  return new Promise((resolve, reject) => {
+    if (!downloadUrl) {
+      reject(new Error('No download URL'));
+      return;
+    }
+
+    const filename = path.basename(new URL(downloadUrl).pathname);
+    const dest = path.join(os.tmpdir(), filename);
+
+    const sendProgress = (pct) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('update-progress', pct);
+      }
+      if (dashWin && !dashWin.isDestroyed()) {
+        dashWin.webContents.send('update-progress', pct);
+      }
+    };
+
+    const doDownload = (url, redirects) => {
+      if (redirects > 5) {
+        reject(new Error('Too many redirects'));
+        return;
+      }
+
+      const parsed = new URL(url);
+      const req = https.request({
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': `claude-usage-widget/${app.getVersion()}`,
+        },
+      }, (res) => {
+        // Follow redirects (GitHub uses 302)
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume(); // drain the response
+          doDownload(res.headers.location, redirects + 1);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error('Download failed: HTTP ' + res.statusCode));
+          return;
+        }
+
+        // Only create file stream once we have a 200
+        const file = fs.createWriteStream(dest);
+        const totalBytes = parseInt(res.headers['content-length'], 10) || 0;
+        let downloaded = 0;
+
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (totalBytes > 0) {
+            sendProgress(Math.round((downloaded / totalBytes) * 100));
+          }
+        });
+
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          sendProgress(100);
+          resolve(dest);
+        });
+        file.on('error', (err) => {
+          fs.unlink(dest, () => {});
+          reject(err);
+        });
+      });
+
+      req.on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+      req.setTimeout(120000, () => {
+        req.destroy();
+        reject(new Error('Download timeout'));
+      });
+      req.end();
+    };
+
+    doDownload(downloadUrl, 0);
   });
 }
 
@@ -467,7 +617,7 @@ function updateTrayTooltip() {
 function buildTrayMenu() {
   const isAutoStart = app.getLoginItemSettings().openAtLogin;
   return Menu.buildFromTemplate([
-    { label: 'Show  (Ctrl+\\)', click: () => toggleWindow() },
+    { label: 'Show  (' + currentHotkey + ')', click: () => toggleWindow() },
     { label: 'Sync Now', click: () => doSync() },
     { label: 'Dashboard', click: () => openDashboard() },
     { type: 'separator' },
@@ -572,6 +722,7 @@ function openDashboard() {
     height: 650,
     minWidth: 700,
     minHeight: 500,
+    frame: false,
     backgroundColor: '#0c0c12',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
@@ -593,6 +744,9 @@ function openDashboard() {
   dashWin.webContents.on('did-finish-load', () => {
     if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
     if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
+    if (lastUpdateResult && lastUpdateResult.hasUpdate) {
+      dashWin.webContents.send('update-available', lastUpdateResult);
+    }
   });
 
   dashWin.on('closed', () => { dashWin = null; });
@@ -634,6 +788,7 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  loadSettings();
   cachedUsage = loadCachedUsage();
   usageHistory = loadHistory();
 
@@ -646,7 +801,7 @@ app.whenReady().then(() => {
   updateTrayTooltip();
 
   // Global hotkey
-  globalShortcut.register(HOTKEY, () => toggleWindow());
+  globalShortcut.register(currentHotkey, () => toggleWindow());
 
   // IPC
   ipcMain.on('request-sync', () => doSync());
@@ -665,6 +820,14 @@ app.whenReady().then(() => {
 
   ipcMain.on('open-dashboard', () => openDashboard());
 
+  ipcMain.on('dash-minimize', () => { if (dashWin && !dashWin.isDestroyed()) dashWin.minimize(); });
+  ipcMain.on('dash-maximize', () => {
+    if (dashWin && !dashWin.isDestroyed()) {
+      dashWin.isMaximized() ? dashWin.unmaximize() : dashWin.maximize();
+    }
+  });
+  ipcMain.on('dash-close', () => { if (dashWin && !dashWin.isDestroyed()) dashWin.close(); });
+
   ipcMain.on('dashboard-request-data', () => {
     if (dashWin && !dashWin.isDestroyed()) {
       if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
@@ -680,10 +843,64 @@ app.whenReady().then(() => {
       if (t.weekAll) ALERT_THRESHOLDS.weekAll = t.weekAll.value;
       if (t.weekSonnet) ALERT_THRESHOLDS.weekSonnet = t.weekSonnet.value;
     }
+    saveSettings();
+  });
+
+  ipcMain.handle('change-hotkey', async (_e, newHotkey) => {
+    if (typeof newHotkey !== 'string' || newHotkey.length === 0) {
+      return { success: false, error: 'Invalid hotkey' };
+    }
+    try {
+      globalShortcut.unregister(currentHotkey);
+      const registered = globalShortcut.register(newHotkey, () => toggleWindow());
+      if (!registered) {
+        // Re-register old hotkey if new one fails
+        globalShortcut.register(currentHotkey, () => toggleWindow());
+        return { success: false, error: 'Hotkey already in use or invalid' };
+      }
+      currentHotkey = newHotkey;
+      saveSettings();
+      // Update tray menu to reflect new hotkey
+      if (tray) tray.setContextMenu(buildTrayMenu());
+      return { success: true, hotkey: currentHotkey };
+    } catch (err) {
+      // Try to restore old hotkey
+      try { globalShortcut.register(currentHotkey, () => toggleWindow()); } catch { /* ignore */ }
+      return { success: false, error: err.message || 'Failed to register hotkey' };
+    }
+  });
+
+  ipcMain.handle('get-settings', async () => {
+    return {
+      hotkey: currentHotkey,
+      alertThresholds: {
+        session: ALERT_THRESHOLDS.session,
+        weekAll: ALERT_THRESHOLDS.weekAll,
+        weekSonnet: ALERT_THRESHOLDS.weekSonnet,
+      },
+    };
   });
 
   ipcMain.handle('check-for-updates', async () => {
     return checkForUpdates();
+  });
+
+  ipcMain.handle('download-and-install-update', async (_e, downloadUrl) => {
+    try {
+      const installerPath = await downloadAndInstallUpdate(downloadUrl);
+      // Launch installer detached, then quit
+      spawn(installerPath, [], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+      setTimeout(() => {
+        if (win && !win.isDestroyed()) win.destroy();
+        app.quit();
+      }, 500);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   // Send cached data on load, then sync
@@ -724,19 +941,15 @@ app.whenReady().then(() => {
   });
 
   // Check for updates on start, then every 24h
-  setTimeout(async () => {
-    const result = await checkForUpdates();
-    if (result.hasUpdate && win && !win.isDestroyed()) {
-      win.webContents.send('update-available', result);
-    }
-  }, 10000);
+  const broadcastUpdate = (result) => {
+    if (!result.hasUpdate) return;
+    lastUpdateResult = result;
+    if (win && !win.isDestroyed()) win.webContents.send('update-available', result);
+    if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('update-available', result);
+  };
 
-  setInterval(async () => {
-    const result = await checkForUpdates();
-    if (result.hasUpdate && win && !win.isDestroyed()) {
-      win.webContents.send('update-available', result);
-    }
-  }, UPDATE_CHECK_INTERVAL);
+  setTimeout(async () => broadcastUpdate(await checkForUpdates()), 10000);
+  setInterval(async () => broadcastUpdate(await checkForUpdates()), UPDATE_CHECK_INTERVAL);
 });
 
 app.on('will-quit', () => {
