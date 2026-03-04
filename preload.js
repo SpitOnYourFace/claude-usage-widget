@@ -29,4 +29,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     handler = (_e, data) => cb(data);
     ipcRenderer.on('history-update', handler);
   },
+  toggleCompact: (isCompact) => ipcRenderer.send('toggle-compact', isCompact),
 });

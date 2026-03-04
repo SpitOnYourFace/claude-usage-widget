@@ -491,6 +491,16 @@ app.whenReady().then(() => {
   ipcMain.on('minimize-to-tray', () => { if (win) { saveBounds(); win.hide(); } });
   ipcMain.on('quit-app', () => { win.destroy(); app.quit(); });
 
+  ipcMain.on('toggle-compact', (_, isCompact) => {
+    if (!win) return;
+    const bounds = win.getBounds();
+    if (isCompact) {
+      win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 160 });
+    } else {
+      win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 400 });
+    }
+  });
+
   // Send cached data on load, then sync
   win.webContents.on('did-finish-load', () => {
     if (cachedUsage) win.webContents.send('usage-update', cachedUsage);

@@ -168,6 +168,12 @@ document.getElementById('closeBtn').addEventListener('click', function() {
   window.electronAPI.quit();
 });
 
+// Double-click title bar to toggle compact mode
+document.querySelector('.header').addEventListener('dblclick', function() {
+  document.body.classList.toggle('compact');
+  window.electronAPI.toggleCompact(document.body.classList.contains('compact'));
+});
+
 // Listen for usage updates from main process
 window.electronAPI.onUsageUpdate(function(data) {
   var oldData = usageData;
