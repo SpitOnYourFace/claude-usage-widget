@@ -298,6 +298,9 @@ async function doSync() {
     cachedUsage = buildUsage(data);
     saveCachedUsage(cachedUsage);
     appendHistory(cachedUsage);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('history-update', usageHistory);
+    }
     if (win && !win.isDestroyed()) win.webContents.send('usage-update', cachedUsage);
     updateTrayTooltip();
   } catch (err) {
@@ -491,6 +494,7 @@ app.whenReady().then(() => {
   // Send cached data on load, then sync
   win.webContents.on('did-finish-load', () => {
     if (cachedUsage) win.webContents.send('usage-update', cachedUsage);
+    if (usageHistory.length > 0) win.webContents.send('history-update', usageHistory);
     if (!syncing) doSync();
   });
 

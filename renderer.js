@@ -1,6 +1,7 @@
 var usageData = null;
 var prevPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
 var animatingPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
+var historyData = [];
 
 function createElement(tag, cls, text) {
   var el = document.createElement(tag);
@@ -53,6 +54,44 @@ function animateNumbers(from, to, key, duration) {
   requestAnimationFrame(step);
 }
 
+function buildSparklineSVG(key, pct) {
+  var cutoff = Date.now() - 86400000;
+  var points = [];
+  for (var i = 0; i < historyData.length; i++) {
+    if (historyData[i].ts > cutoff) {
+      points.push(historyData[i][key]);
+    }
+  }
+  if (points.length < 2) return null;
+
+  // Downsample to max 30 points
+  if (points.length > 30) {
+    var step = points.length / 30;
+    var sampled = [];
+    for (var j = 0; j < 30; j++) {
+      sampled.push(points[Math.floor(j * step)]);
+    }
+    points = sampled;
+  }
+
+  var w = 60, h = 14;
+  var maxVal = Math.max.apply(null, points.concat([1]));
+  var coords = [];
+  for (var k = 0; k < points.length; k++) {
+    var x = (k / (points.length - 1)) * w;
+    var y = h - (points[k] / Math.max(maxVal, 100)) * (h - 2) - 1;
+    coords.push(x.toFixed(1) + ',' + y.toFixed(1));
+  }
+
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  svg.setAttribute('class', 'sparkline ' + getBarClass(pct));
+  var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  polyline.setAttribute('points', coords.join(' '));
+  svg.appendChild(polyline);
+  return svg;
+}
+
 function renderUsageRow(container, data, key) {
   while (container.firstChild) container.removeChild(container.firstChild);
   if (!data) return;
@@ -66,6 +105,10 @@ function renderUsageRow(container, data, key) {
   var pctEl = createElement('div', 'bar-pct', data.pct + '% used');
   if (key) pctEl.id = key + 'Pct';
   barContainer.appendChild(pctEl);
+  if (key) {
+    var spark = buildSparklineSVG(key, data.pct);
+    if (spark) barContainer.appendChild(spark);
+  }
   container.appendChild(barContainer);
   if (data.resetsAt) {
     container.appendChild(createElement('div', 'reset-info', formatResetTime(data.resetsAt)));
@@ -152,6 +195,10 @@ window.electronAPI.onSyncStart(function() {
 
 window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
+});
+
+window.electronAPI.onHistoryUpdate(function(data) {
+  historyData = data;
 });
 
 // Request initial data

@@ -23,4 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncErrorHandler = (_e, msg) => cb(msg);
     ipcRenderer.on('sync-error', syncErrorHandler);
   },
+  onHistoryUpdate: (cb) => {
+    let handler = null;
+    if (handler) ipcRenderer.removeListener('history-update', handler);
+    handler = (_e, data) => cb(data);
+    ipcRenderer.on('history-update', handler);
+  },
 });
