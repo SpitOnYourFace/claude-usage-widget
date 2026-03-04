@@ -207,6 +207,13 @@ window.electronAPI.onHistoryUpdate(function(data) {
   historyData = data;
 });
 
+window.electronAPI.onUpdateAvailable(function(data) {
+  var banner = document.getElementById('updateBanner');
+  banner.textContent = 'v' + data.latestVersion + ' available';
+  banner.style.display = '';
+  banner.title = 'Click to open release page';
+});
+
 document.getElementById('dashBtn').addEventListener('click', function() {
   window.electronAPI.openDashboard();
 });

@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     handler = (_e, data) => cb(data);
     ipcRenderer.on('history-update', handler);
   },
+  onUpdateAvailable: (cb) => {
+    let handler = null;
+    if (handler) ipcRenderer.removeListener('update-available', handler);
+    handler = (_e, data) => cb(data);
+    ipcRenderer.on('update-available', handler);
+  },
   toggleCompact: (isCompact) => ipcRenderer.send('toggle-compact', isCompact),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
 });

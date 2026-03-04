@@ -217,6 +217,46 @@ function updateTrayBadge(usage) {
   }
 }
 
+// --- Auto-update check ---
+
+let lastUpdateCheck = 0;
+const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
+function checkForUpdates() {
+  return new Promise((resolve) => {
+    const url = new URL('https://api.github.com/repos/SpitOnYourFace/claude-usage-widget/releases/latest');
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname,
+      method: 'GET',
+      headers: {
+        'User-Agent': `claude-usage-widget/${app.getVersion()}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const latestTag = (data.tag_name || '').replace(/^v/, '');
+          const current = app.getVersion();
+          if (latestTag && latestTag !== current) {
+            resolve({ hasUpdate: true, latestVersion: latestTag, url: data.html_url });
+          } else {
+            resolve({ hasUpdate: false });
+          }
+        } catch {
+          resolve({ hasUpdate: false });
+        }
+      });
+    });
+    req.on('error', () => resolve({ hasUpdate: false }));
+    req.setTimeout(10000, () => { req.destroy(); resolve({ hasUpdate: false }); });
+    req.end();
+  });
+}
+
 // --- OAuth token ---
 
 function getAccessToken() {
@@ -642,6 +682,10 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle('check-for-updates', async () => {
+    return checkForUpdates();
+  });
+
   // Send cached data on load, then sync
   win.webContents.on('did-finish-load', () => {
     if (cachedUsage) win.webContents.send('usage-update', cachedUsage);
@@ -678,6 +722,21 @@ app.whenReady().then(() => {
     activeRequest = null;
     setTimeout(() => doSync(), 3000);
   });
+
+  // Check for updates on start, then every 24h
+  setTimeout(async () => {
+    const result = await checkForUpdates();
+    if (result.hasUpdate && win && !win.isDestroyed()) {
+      win.webContents.send('update-available', result);
+    }
+  }, 10000);
+
+  setInterval(async () => {
+    const result = await checkForUpdates();
+    if (result.hasUpdate && win && !win.isDestroyed()) {
+      win.webContents.send('update-available', result);
+    }
+  }, UPDATE_CHECK_INTERVAL);
 });
 
 app.on('will-quit', () => {
