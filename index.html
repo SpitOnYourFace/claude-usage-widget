@@ -30,9 +30,20 @@
     overflow: hidden;
     -webkit-app-region: drag;
     user-select: none;
+    display: flex;
+    flex-direction: column;
   }
   .widget {
     padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+  .usage-rows {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
   .header {
     display: flex;
@@ -124,6 +135,7 @@
     margin-top: 12px; padding-top: 10px;
     border-top: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
   }
   .footer-left {
     display: flex; align-items: center; gap: 8px;
@@ -132,15 +144,17 @@
     font-size: 10px; color: var(--text-dim);
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   }
+  .footer-hint.stale { color: var(--yellow); }
+  .footer-hint.error { color: var(--red); }
   .refresh-btn {
-    width: 16px; height: 16px; border: none; border-radius: 50%;
-    background: var(--surface2); color: var(--text-dim);
+    width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 5px;
+    background: var(--surface2); color: var(--text);
     cursor: pointer; -webkit-app-region: no-drag;
-    font-size: 11px; display: flex; align-items: center;
+    font-size: 14px; display: flex; align-items: center;
     justify-content: center; transition: all 0.2s;
     padding: 0;
   }
-  .refresh-btn:hover { background: var(--border); color: var(--text); }
+  .refresh-btn:hover { background: var(--border); color: var(--accent); }
   .refresh-btn.spinning { animation: spin 0.8s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .footer-update-btn {
@@ -208,15 +222,17 @@
     </div>
   </div>
 
-  <div class="usage-section">
-    <div class="usage-row" id="sessionRow"></div>
-    <div class="usage-row" id="weekAllRow"></div>
-    <div class="usage-row" id="weekSonnetRow"></div>
-  </div>
+  <div class="usage-rows">
+    <div class="usage-section">
+      <div class="usage-row" id="sessionRow"></div>
+      <div class="usage-row" id="weekAllRow"></div>
+      <div class="usage-row" id="weekSonnetRow"></div>
+    </div>
 
-  <div class="extra-section">
-    <div class="extra-label">Extra usage</div>
-    <div class="extra-info" id="extraInfo">Loading...</div>
+    <div class="extra-section">
+      <div class="extra-label">Extra usage</div>
+      <div class="extra-info" id="extraInfo">Loading...</div>
+    </div>
   </div>
 
   <div class="footer">

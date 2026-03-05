@@ -1,5 +1,6 @@
 var usageData = null;
 var animatingPcts = { session: 0, weekAll: 0, weekSonnet: 0 };
+var lastSyncError = null; // persists error message until next successful sync
 
 function createElement(tag, cls, text) {
   var el = document.createElement(tag);
@@ -106,11 +107,15 @@ function updateTimers() {
     }
   }
 
-  // Update "synced X ago"
-  if (usageData.syncTime) {
+  // Update "synced X ago" — but don't overwrite error messages
+  var footer = document.getElementById('footerHint');
+  if (lastSyncError) {
+    footer.textContent = lastSyncError;
+    footer.className = 'footer-hint error';
+  } else if (usageData.syncTime) {
     var ago = Math.round((Date.now() - usageData.syncTime) / 60000);
-    document.getElementById('footerHint').textContent =
-      ago < 1 ? 'Synced just now' : 'Synced ' + ago + 'm ago';
+    footer.textContent = ago < 1 ? 'Synced just now' : 'Synced ' + ago + 'm ago';
+    footer.className = ago >= 5 ? 'footer-hint stale' : 'footer-hint';
   }
 }
 
@@ -156,6 +161,7 @@ document.querySelector('.header').addEventListener('dblclick', function() {
 window.electronAPI.onUsageUpdate(function(data) {
   var oldData = usageData;
   usageData = data;
+  lastSyncError = null; // clear error on successful sync
   renderAll();
   setSyncStatus('live');
 
@@ -179,9 +185,10 @@ window.electronAPI.onSyncStart(function() {
 
 window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
-  // Show helpful first-run message if no OAuth token
   if (msg && msg.indexOf('OAuth') >= 0) {
-    document.getElementById('footerHint').textContent = 'Log in to Claude Code first';
+    lastSyncError = 'Log in to Claude Code first';
+  } else if (msg) {
+    lastSyncError = 'Sync failed';
   }
 });
 

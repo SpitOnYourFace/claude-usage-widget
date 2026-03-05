@@ -248,6 +248,21 @@ function checkAndNotify(usage) {
   }
 }
 
+function getAlertTrayIcon() {
+  // Generate gauge icon with a red alert dot overlay
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+    <rect width="16" height="16" rx="3.5" fill="#0a0a14"/>
+    <path d="M 3 10 A 5 5 0 0 1 13 10" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"/>
+    <path d="M 7 10 A 1.5 1.5 0 0 1 13 10" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+    <line x1="8" y1="10" x2="5.5" y2="6" stroke="white" stroke-width="1" stroke-linecap="round"/>
+    <circle cx="8" cy="10" r="1" fill="#d4845a"/>
+    <circle cx="13" cy="3" r="3" fill="#f87171"/>
+  </svg>`;
+  return nativeImage.createFromDataURL(
+    `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
+  );
+}
+
 function updateTrayBadge(usage) {
   if (!tray) return;
   const hasAlert = usage.session.pct >= ALERT_THRESHOLDS.session
@@ -256,20 +271,22 @@ function updateTrayBadge(usage) {
 
   if (hasAlert !== trayHasAlert) {
     trayHasAlert = hasAlert;
-    if (hasAlert) {
-      const dotSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-        <circle cx="12" cy="4" r="3.5" fill="#f87171"/>
-      </svg>`;
-      const dotImage = nativeImage.createFromDataURL(
-        'data:image/svg+xml;base64,' + Buffer.from(dotSvg).toString('base64')
-      );
-      if (process.platform === 'win32' && win) {
-        win.setOverlayIcon(dotImage, 'Usage alert');
+    if (process.platform === 'win32') {
+      // Windows: use overlay icon on taskbar
+      if (hasAlert) {
+        const dotSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+          <circle cx="12" cy="4" r="3.5" fill="#f87171"/>
+        </svg>`;
+        const dotImage = nativeImage.createFromDataURL(
+          'data:image/svg+xml;base64,' + Buffer.from(dotSvg).toString('base64')
+        );
+        if (win) win.setOverlayIcon(dotImage, 'Usage alert');
+      } else {
+        if (win) win.setOverlayIcon(null, '');
       }
     } else {
-      if (process.platform === 'win32' && win) {
-        win.setOverlayIcon(null, '');
-      }
+      // Linux & macOS: swap the tray icon itself
+      tray.setImage(hasAlert ? getAlertTrayIcon() : getTrayIcon());
     }
   }
 }
@@ -310,13 +327,22 @@ function checkForUpdates() {
           const latestTag = (data.tag_name || '').replace(/^v/, '');
           const current = app.getVersion();
           if (latestTag && isNewerVersion(latestTag, current)) {
-            // Find the Windows installer asset (.exe)
+            // Find platform-appropriate installer asset
             let downloadUrl = null;
             if (Array.isArray(data.assets)) {
-              const exeAsset = data.assets.find((a) =>
-                /\.exe$/i.test(a.name) && /setup/i.test(a.name)
-              );
-              if (exeAsset) downloadUrl = exeAsset.browser_download_url;
+              let asset = null;
+              if (process.platform === 'win32') {
+                asset = data.assets.find((a) =>
+                  /\.exe$/i.test(a.name) && /setup/i.test(a.name)
+                );
+              } else if (process.platform === 'darwin') {
+                asset = data.assets.find((a) => /\.dmg$/i.test(a.name));
+              } else {
+                // Linux: prefer AppImage, fallback to .deb
+                asset = data.assets.find((a) => /\.AppImage$/i.test(a.name))
+                  || data.assets.find((a) => /\.deb$/i.test(a.name));
+              }
+              if (asset) downloadUrl = asset.browser_download_url;
             }
             resolve({
               hasUpdate: true,
@@ -478,6 +504,8 @@ function getAccessToken(forceRefresh) {
 
 // --- Fetch usage from Anthropic API ---
 
+let rateLimitUntil = 0; // backoff timestamp after 429
+
 function resetSyncIfStale() {
   if (syncing && syncStartedAt > 0 && (Date.now() - syncStartedAt) > SYNC_TIMEOUT_MS) {
     if (activeRequest) {
@@ -493,6 +521,10 @@ function fetchUsage() {
   return new Promise((resolve, reject) => {
     resetSyncIfStale();
     if (syncing) { reject(new Error('Already syncing')); return; }
+    if (Date.now() < rateLimitUntil) {
+      reject(new Error('Rate limited — waiting'));
+      return;
+    }
     syncing = true;
     syncStartedAt = Date.now();
 
@@ -533,6 +565,14 @@ function fetchUsage() {
         'User-Agent': `claude-usage-widget/${app.getVersion()}`,
       },
     }, (res) => {
+      // Handle rate limiting — back off for 2 minutes
+      if (res.statusCode === 429) {
+        res.resume();
+        rateLimitUntil = Date.now() + 120000;
+        finish(new Error('Rate limited'));
+        return;
+      }
+
       const MAX_BODY = 1024 * 1024; // 1 MB
       let body = '';
       res.on('data', (chunk) => {
@@ -549,6 +589,8 @@ function fetchUsage() {
             finish(new Error(data.error?.message || 'API error'));
             return;
           }
+          // Successful response — clear any rate limit backoff
+          rateLimitUntil = 0;
           finish(null, data);
         } catch {
           finish(new Error('Invalid response'));
@@ -697,8 +739,54 @@ function updateTrayTooltip() {
   }
 }
 
+// --- Linux auto-start via .desktop file ---
+
+const LINUX_AUTOSTART_DIR = path.join(os.homedir(), '.config', 'autostart');
+const LINUX_DESKTOP_FILE = path.join(LINUX_AUTOSTART_DIR, 'claude-meter.desktop');
+
+function getLinuxAutoStart() {
+  if (process.platform !== 'linux') return false;
+  return fs.existsSync(LINUX_DESKTOP_FILE);
+}
+
+function setLinuxAutoStart(enabled) {
+  if (process.platform !== 'linux') return;
+  if (enabled) {
+    try {
+      fs.mkdirSync(LINUX_AUTOSTART_DIR, { recursive: true });
+      const exePath = process.execPath;
+      const desktop = [
+        '[Desktop Entry]',
+        'Type=Application',
+        'Name=Claude Meter',
+        'Exec=' + exePath,
+        'Icon=claude-meter',
+        'Terminal=false',
+        'StartupWMClass=claude-usage-widget',
+        'X-GNOME-Autostart-enabled=true',
+      ].join('\n') + '\n';
+      fs.writeFileSync(LINUX_DESKTOP_FILE, desktop);
+    } catch { /* ignore */ }
+  } else {
+    try { fs.unlinkSync(LINUX_DESKTOP_FILE); } catch { /* ignore */ }
+  }
+}
+
+function getAutoStartEnabled() {
+  if (process.platform === 'linux') return getLinuxAutoStart();
+  return app.getLoginItemSettings().openAtLogin;
+}
+
+function setAutoStartEnabled(enabled) {
+  if (process.platform === 'linux') {
+    setLinuxAutoStart(enabled);
+  } else {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+  }
+}
+
 function buildTrayMenu() {
-  const isAutoStart = app.getLoginItemSettings().openAtLogin;
+  const isAutoStart = getAutoStartEnabled();
   return Menu.buildFromTemplate([
     { label: 'Show  (' + currentHotkey + ')', click: () => toggleWindow() },
     { label: 'Sync Now', click: () => doSync() },
@@ -709,7 +797,7 @@ function buildTrayMenu() {
       type: 'checkbox',
       checked: isAutoStart,
       click: (item) => {
-        app.setLoginItemSettings({ openAtLogin: item.checked });
+        setAutoStartEnabled(item.checked);
       },
     },
     { type: 'separator' },
@@ -725,13 +813,13 @@ function createWindow() {
 
   win = new BrowserWindow({
     width: saved?.width || 480,
-    height: saved?.height || 400,
+    height: saved?.height || 450,
     x: saved?.x,
     y: saved?.y,
     frame: false,
     resizable: true,
     minWidth: 320,
-    minHeight: 280,
+    minHeight: 320,
     skipTaskbar: true,
     alwaysOnTop: true,
     backgroundColor: '#0c0c12',
@@ -792,8 +880,14 @@ function toggleWindow() {
       win.webContents.send('usage-update', cachedUsage);
     }
     doSync();
-    trayHasAlert = false;
-    if (process.platform === 'win32' && win) win.setOverlayIcon(null, '');
+    if (trayHasAlert) {
+      trayHasAlert = false;
+      if (process.platform === 'win32') {
+        if (win) win.setOverlayIcon(null, '');
+      } else if (tray) {
+        tray.setImage(getTrayIcon());
+      }
+    }
   }
 }
 
@@ -803,7 +897,7 @@ function openDashboard() {
     // Refresh data when re-focusing existing dashboard
     if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
     if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
-    if (Date.now() - lastAutoSync > 15000) { lastAutoSync = Date.now(); doSync(); }
+    if (Date.now() - lastAutoSync > 60000) { lastAutoSync = Date.now(); doSync(); }
     return;
   }
 
@@ -853,7 +947,7 @@ function startFileWatcher() {
     fileWatcher = fs.watch(PROJECTS_DIR, { recursive: supportsRecursive }, (_, filename) => {
       if (!filename || !/\.jsonl$/i.test(filename)) return;
       const now = Date.now();
-      if (now - lastAutoSync < 15000) return;
+      if (now - lastAutoSync < 60000) return;
       if (fileChangeTimer) clearTimeout(fileChangeTimer);
       fileChangeTimer = setTimeout(() => {
         lastAutoSync = Date.now();
@@ -920,7 +1014,7 @@ app.whenReady().then(() => {
     if (isCompact) {
       win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 160 });
     } else {
-      win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 400 });
+      win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: 450 });
     }
   });
 
@@ -939,7 +1033,7 @@ app.whenReady().then(() => {
       if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
       if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
     }
-    if (Date.now() - lastAutoSync > 15000) { lastAutoSync = Date.now(); doSync(); }
+    if (Date.now() - lastAutoSync > 60000) { lastAutoSync = Date.now(); doSync(); }
   });
 
   ipcMain.on('dashboard-save-settings', (event, settings) => {
@@ -1029,10 +1123,34 @@ app.whenReady().then(() => {
       const installerPath = await downloadAndInstallUpdate(downloadUrl);
       // Launch installer detached, then quit
       try {
-        spawn(installerPath, [], {
-          detached: true,
-          stdio: 'ignore',
-        }).unref();
+        if (process.platform === 'darwin' && /\.dmg$/i.test(installerPath)) {
+          // macOS: open the .dmg via Finder
+          spawn('open', [installerPath], {
+            detached: true,
+            stdio: 'ignore',
+          }).unref();
+        } else if (process.platform === 'linux' && /\.AppImage$/i.test(installerPath)) {
+          // Linux AppImage: make executable then launch
+          fs.chmodSync(installerPath, 0o755);
+          spawn(installerPath, [], {
+            detached: true,
+            stdio: 'ignore',
+          }).unref();
+        } else {
+          // Windows .exe or Linux .deb (deb handled via dpkg/gdebi by user)
+          if (process.platform === 'linux' && /\.deb$/i.test(installerPath)) {
+            // For .deb, open with default handler (e.g. software center)
+            spawn('xdg-open', [installerPath], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref();
+          } else {
+            spawn(installerPath, [], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref();
+          }
+        }
       } catch (spawnErr) {
         fs.unlink(installerPath, () => {});
         return { success: false, error: 'Failed to launch installer: ' + spawnErr.message };
@@ -1054,14 +1172,14 @@ app.whenReady().then(() => {
     if (!syncing) doSync();
   });
 
-  // Auto-refresh: 15s visible, 60s hidden
+  // Auto-refresh: 60s visible, 5min hidden
   setInterval(() => {
     if (win && win.isVisible()) doSync();
-  }, 15000);
+  }, 60000);
 
   setInterval(() => {
     if (win && !win.isVisible()) doSync();
-  }, 60000);
+  }, 300000);
 
   startFileWatcher();
 
