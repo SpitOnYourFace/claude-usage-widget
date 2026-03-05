@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('dashboardAPI', {
   requestData: () => ipcRenderer.send('dashboard-request-data'),
   saveSettings: (settings) => ipcRenderer.send('dashboard-save-settings', settings),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-  installUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
+  installUpdate: () => ipcRenderer.invoke('download-and-install-update'),
   changeHotkey: (hotkey) => ipcRenderer.invoke('change-hotkey', hotkey),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   onUsageUpdate: (cb) => {

@@ -14,6 +14,7 @@ const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 
 // --- Constants ---
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -76,8 +77,20 @@ function loadBounds() {
   return null;
 }
 
+let boundsDebounce = null;
 function saveBounds() {
   if (!win) return;
+  if (boundsDebounce) clearTimeout(boundsDebounce);
+  boundsDebounce = setTimeout(() => {
+    if (!win || win.isDestroyed()) return;
+    try {
+      fs.writeFileSync(BOUNDS_FILE, JSON.stringify(win.getBounds()));
+    } catch { /* ignore */ }
+  }, 500);
+}
+function saveBoundsNow() {
+  if (boundsDebounce) { clearTimeout(boundsDebounce); boundsDebounce = null; }
+  if (!win || win.isDestroyed()) return;
   try {
     fs.writeFileSync(BOUNDS_FILE, JSON.stringify(win.getBounds()));
   } catch { /* ignore */ }
@@ -152,11 +165,15 @@ function appendHistory(usage) {
 
 // --- Settings persistence ---
 
+// Validate hotkey accelerator format before passing to globalShortcut
+const SAFE_HOTKEY_RE = /^(Ctrl|Alt|Shift|Super|Cmd|Command)(\+(Ctrl|Alt|Shift|Super|Cmd|Command))*\+[A-Za-z0-9\\[\];',./`\-=F]$/;
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
-      if (data.hotkey && typeof data.hotkey === 'string') {
+      if (data.hotkey && typeof data.hotkey === 'string'
+        && data.hotkey.length <= 50 && SAFE_HOTKEY_RE.test(data.hotkey)) {
         currentHotkey = data.hotkey;
       }
       if (data.alertThresholds) {
@@ -328,8 +345,8 @@ function downloadAndInstallUpdate(downloadUrl) {
       return;
     }
 
-    const filename = path.basename(new URL(downloadUrl).pathname);
-    const dest = path.join(os.tmpdir(), filename);
+    const ext = path.extname(new URL(downloadUrl).pathname) || '.exe';
+    const dest = path.join(os.tmpdir(), 'claude-meter-' + crypto.randomUUID() + ext);
 
     const sendProgress = (pct) => {
       if (win && !win.isDestroyed()) {
@@ -363,7 +380,7 @@ function downloadAndInstallUpdate(downloadUrl) {
             const redirectUrl = new URL(res.headers.location);
             const allowedHosts = ['github.com', 'objects.githubusercontent.com',
               'github-releases.githubusercontent.com', 'github-production-release-asset-2e65be.s3.amazonaws.com'];
-            if (redirectUrl.protocol !== 'https:' || !allowedHosts.some((h) => redirectUrl.hostname.endsWith(h))) {
+            if (redirectUrl.protocol !== 'https:' || !allowedHosts.some((h) => redirectUrl.hostname === h || redirectUrl.hostname.endsWith('.' + h))) {
               reject(new Error('Redirect to untrusted host: ' + redirectUrl.hostname));
               return;
             }
@@ -385,11 +402,16 @@ function downloadAndInstallUpdate(downloadUrl) {
         const file = fs.createWriteStream(dest);
         const totalBytes = parseInt(res.headers['content-length'], 10) || 0;
         let downloaded = 0;
+        let lastSentPct = -1;
 
         res.on('data', (chunk) => {
           downloaded += chunk.length;
           if (totalBytes > 0) {
-            sendProgress(Math.round((downloaded / totalBytes) * 100));
+            const pct = Math.round((downloaded / totalBytes) * 100);
+            if (pct !== lastSentPct) {
+              lastSentPct = pct;
+              sendProgress(pct);
+            }
           }
         });
 
@@ -397,13 +419,10 @@ function downloadAndInstallUpdate(downloadUrl) {
         file.on('finish', () => {
           file.close();
           // Verify download size matches Content-Length
-          if (totalBytes > 0) {
-            const stat = fs.statSync(dest);
-            if (stat.size !== totalBytes) {
-              fs.unlink(dest, () => {});
-              reject(new Error('Download size mismatch: expected ' + totalBytes + ', got ' + stat.size));
-              return;
-            }
+          if (totalBytes > 0 && downloaded !== totalBytes) {
+            fs.unlink(dest, () => {});
+            reject(new Error('Download size mismatch: expected ' + totalBytes + ', got ' + downloaded));
+            return;
           }
           sendProgress(100);
           resolve(dest);
@@ -429,18 +448,30 @@ function downloadAndInstallUpdate(downloadUrl) {
   });
 }
 
-// --- OAuth token ---
+// --- OAuth token (cached to avoid reading file on every sync) ---
 
-function getAccessToken() {
+let cachedToken = null;
+let tokenLastRead = 0;
+const TOKEN_CACHE_MS = 5 * 60 * 1000; // re-read every 5 minutes
+
+function getAccessToken(forceRefresh) {
+  const now = Date.now();
+  if (!forceRefresh && cachedToken && (now - tokenLastRead) < TOKEN_CACHE_MS) {
+    return cachedToken;
+  }
   try {
     const creds = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf-8'));
     const token = creds.claudeAiOauth?.accessToken;
     // Validate: non-empty string, no CRLF (header injection guard)
     if (typeof token !== 'string' || token.length === 0 || /[\r\n]/.test(token)) {
+      cachedToken = null;
       return null;
     }
+    cachedToken = token;
+    tokenLastRead = now;
     return token;
   } catch {
+    cachedToken = null;
     return null;
   }
 }
@@ -623,6 +654,8 @@ async function doSync() {
     updateTrayTooltip();
   } catch (err) {
     // Truncate error — may contain untrusted content from API response
+    // Force token re-read on next sync in case of auth error
+    cachedToken = null;
     const safeMsg = typeof err.message === 'string'
       ? err.message.slice(0, 200)
       : 'Unknown error';
@@ -724,7 +757,7 @@ function createWindow() {
 
   win.on('close', (e) => {
     e.preventDefault();
-    saveBounds();
+    saveBoundsNow();
     win.hide();
   });
 
@@ -733,7 +766,7 @@ function createWindow() {
 
   win.on('blur', () => {
     if (win && win.isVisible()) {
-      saveBounds();
+      saveBoundsNow();
       win.hide();
     }
   });
@@ -742,7 +775,7 @@ function createWindow() {
 function toggleWindow() {
   if (!win) return;
   if (win.isVisible()) {
-    saveBounds();
+    saveBoundsNow();
     win.hide();
   } else {
     const saved = loadBounds();
@@ -770,7 +803,7 @@ function openDashboard() {
     // Refresh data when re-focusing existing dashboard
     if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
     if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
-    doSync();
+    if (Date.now() - lastAutoSync > 15000) { lastAutoSync = Date.now(); doSync(); }
     return;
   }
 
@@ -814,18 +847,19 @@ function openDashboard() {
 
 function startFileWatcher() {
   try {
-    if (fs.existsSync(PROJECTS_DIR)) {
-      fileWatcher = fs.watch(PROJECTS_DIR, { recursive: true }, (_, filename) => {
-        if (!filename || !/\.jsonl$/i.test(filename)) return;
-        const now = Date.now();
-        if (now - lastAutoSync < 15000) return;
-        if (fileChangeTimer) clearTimeout(fileChangeTimer);
-        fileChangeTimer = setTimeout(() => {
-          lastAutoSync = Date.now();
-          doSync();
-        }, 3000);
-      });
-    }
+    if (!fs.existsSync(PROJECTS_DIR)) return;
+    // recursive: true is only supported on macOS and Windows
+    const supportsRecursive = process.platform === 'win32' || process.platform === 'darwin';
+    fileWatcher = fs.watch(PROJECTS_DIR, { recursive: supportsRecursive }, (_, filename) => {
+      if (!filename || !/\.jsonl$/i.test(filename)) return;
+      const now = Date.now();
+      if (now - lastAutoSync < 15000) return;
+      if (fileChangeTimer) clearTimeout(fileChangeTimer);
+      fileChangeTimer = setTimeout(() => {
+        lastAutoSync = Date.now();
+        doSync();
+      }, 3000);
+    });
   } catch { /* ignore */ }
 }
 
@@ -846,6 +880,9 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // Ensure data directory exists
+  try { fs.mkdirSync(CLAUDE_DIR, { recursive: true }); } catch { /* ignore */ }
+
   loadSettings();
   cachedUsage = loadCachedUsage();
   usageHistory = loadHistory();
@@ -861,10 +898,21 @@ app.whenReady().then(() => {
   // Global hotkey
   globalShortcut.register(currentHotkey, () => toggleWindow());
 
+  // IPC sender validation helper
+  const isLocalSender = (event) => {
+    try {
+      return event.senderFrame && event.senderFrame.url.startsWith('file://');
+    } catch { return false; }
+  };
+
   // IPC
   ipcMain.on('request-sync', () => doSync());
-  ipcMain.on('minimize-to-tray', () => { if (win) { saveBounds(); win.hide(); } });
-  ipcMain.on('quit-app', () => { win.destroy(); app.quit(); });
+  ipcMain.on('minimize-to-tray', () => { if (win) { saveBoundsNow(); win.hide(); } });
+  ipcMain.on('quit-app', (event) => {
+    if (!isLocalSender(event)) return;
+    if (win && !win.isDestroyed()) win.destroy();
+    app.quit();
+  });
 
   ipcMain.on('toggle-compact', (_, isCompact) => {
     if (!win) return;
@@ -891,10 +939,11 @@ app.whenReady().then(() => {
       if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
       if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
     }
-    doSync();
+    if (Date.now() - lastAutoSync > 15000) { lastAutoSync = Date.now(); doSync(); }
   });
 
-  ipcMain.on('dashboard-save-settings', (_, settings) => {
+  ipcMain.on('dashboard-save-settings', (event, settings) => {
+    if (!isLocalSender(event)) return;
     if (!settings || typeof settings !== 'object') return;
     if (settings.alertThresholds && typeof settings.alertThresholds === 'object') {
       const t = settings.alertThresholds;
@@ -914,7 +963,8 @@ app.whenReady().then(() => {
     saveSettings();
   });
 
-  ipcMain.handle('change-hotkey', async (_e, newHotkey) => {
+  ipcMain.handle('change-hotkey', async (event, newHotkey) => {
+    if (!isLocalSender(event)) return { success: false, error: 'Unauthorized' };
     if (typeof newHotkey !== 'string' || newHotkey.length === 0) {
       return { success: false, error: 'Invalid hotkey' };
     }
@@ -954,7 +1004,13 @@ app.whenReady().then(() => {
     return checkForUpdates();
   });
 
-  ipcMain.handle('download-and-install-update', async (_e, downloadUrl) => {
+  ipcMain.handle('download-and-install-update', async (event) => {
+    if (!isLocalSender(event)) return { success: false, error: 'Unauthorized' };
+    // Use the URL from the main-process update check — never trust renderer input
+    const downloadUrl = lastUpdateResult?.downloadUrl;
+    if (!downloadUrl) {
+      return { success: false, error: 'No update URL available' };
+    }
     // Validate URL — only allow GitHub releases
     try {
       const parsed = new URL(downloadUrl);
@@ -972,10 +1028,15 @@ app.whenReady().then(() => {
     try {
       const installerPath = await downloadAndInstallUpdate(downloadUrl);
       // Launch installer detached, then quit
-      spawn(installerPath, [], {
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
+      try {
+        spawn(installerPath, [], {
+          detached: true,
+          stdio: 'ignore',
+        }).unref();
+      } catch (spawnErr) {
+        fs.unlink(installerPath, () => {});
+        return { success: false, error: 'Failed to launch installer: ' + spawnErr.message };
+      }
       setTimeout(() => {
         if (win && !win.isDestroyed()) win.destroy();
         app.quit();
@@ -1000,7 +1061,7 @@ app.whenReady().then(() => {
 
   setInterval(() => {
     if (win && !win.isVisible()) doSync();
-  }, 30000);
+  }, 60000);
 
   startFileWatcher();
 

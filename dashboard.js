@@ -568,14 +568,14 @@ function saveAlertThresholds() {
 
 var currentDisplayHotkey = 'Ctrl+\\';
 var isRecordingHotkey = false;
-var currentAppVersion = '2.0.0';
+var currentAppVersion = '...';
 
 function formatElectronAccelerator(e) {
   var parts = [];
   if (e.ctrlKey) parts.push('Ctrl');
   if (e.altKey) parts.push('Alt');
   if (e.shiftKey) parts.push('Shift');
-  if (e.metaKey) parts.push('Super');
+  if (e.metaKey) parts.push(navigator.platform.indexOf('Mac') >= 0 ? 'Cmd' : 'Super');
 
   // Map key to Electron accelerator format
   var key = e.key;
@@ -811,7 +811,7 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
   btn.classList.add('downloading');
   document.getElementById('updateProgress').classList.add('visible');
 
-  window.dashboardAPI.installUpdate(pendingUpdate.downloadUrl).then(function(result) {
+  window.dashboardAPI.installUpdate().then(function(result) {
     if (result.success) {
       btn.textContent = 'Installing...';
       btn.classList.remove('downloading');
@@ -860,11 +860,23 @@ window.dashboardAPI.onSyncError(function(msg) {
   if (usageData) renderOverview();
 });
 
-// Update countdowns every 10 seconds (not every 1s — reduces DOM thrashing)
+// Update countdowns every 10 seconds (lightweight text patch, no DOM rebuild)
 setInterval(function() {
   if (!usageData) return;
-  renderOverview();
+  updateDashboardTimers();
 }, 10000);
+
+function updateDashboardTimers() {
+  // Patch countdown text in overview cards
+  var metaSpans = document.querySelectorAll('#overviewCards .card-meta');
+  var sources = [usageData.session, usageData.weekAll, usageData.weekSonnet];
+  for (var i = 0; i < metaSpans.length && i < sources.length; i++) {
+    var spans = metaSpans[i].querySelectorAll('span');
+    if (spans.length >= 2 && sources[i]) {
+      spans[1].textContent = formatCountdown(sources[i].resetsAt);
+    }
+  }
+}
 
 // Redraw chart on window resize
 window.addEventListener('resize', function() {

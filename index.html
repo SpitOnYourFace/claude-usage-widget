@@ -76,6 +76,16 @@
   .win-btn:hover { opacity: 1; }
   .win-btn.minimize { background: var(--yellow); }
   .win-btn.close { background: var(--red); }
+  .dash-btn {
+    width: 18px; height: 18px; border: none; border-radius: 4px;
+    background: var(--surface2); color: var(--text-dim);
+    cursor: pointer; -webkit-app-region: no-drag;
+    font-size: 12px; display: flex; align-items: center;
+    justify-content: center; transition: all 0.2s;
+    padding: 0; margin-left: 4px;
+  }
+  .dash-btn:hover { background: var(--border); color: var(--accent); }
+  .dash-btn svg { width: 12px; height: 12px; }
 
   .usage-section { margin-bottom: 16px; }
   .usage-row { margin-bottom: 12px; }
@@ -190,7 +200,7 @@
       <span class="dot stale" id="statusDot"></span>
       <span class="title">Claude Meter</span>
       <span class="sync-status" id="syncStatus"></span>
-      <button class="win-btn" id="dashBtn" title="Open Dashboard" style="background: var(--accent); width: 14px; height: 14px; -webkit-app-region: no-drag; margin-left: 4px;"></button>
+      <button class="dash-btn" id="dashBtn" title="Open Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     </div>
     <div class="window-controls">
       <button class="win-btn minimize" id="minimizeBtn" title="Minimize to tray (Ctrl+\)"></button>

@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     progressHandler = (_e, pct) => cb(pct);
     ipcRenderer.on('update-progress', progressHandler);
   },
-  installUpdate: (downloadUrl) => ipcRenderer.invoke('download-and-install-update', downloadUrl),
+  installUpdate: () => ipcRenderer.invoke('download-and-install-update'),
   toggleCompact: (isCompact) => ipcRenderer.send('toggle-compact', isCompact),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
 });

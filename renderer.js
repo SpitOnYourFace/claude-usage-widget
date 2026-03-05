@@ -179,6 +179,10 @@ window.electronAPI.onSyncStart(function() {
 
 window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
+  // Show helpful first-run message if no OAuth token
+  if (msg && msg.indexOf('OAuth') >= 0) {
+    document.getElementById('footerHint').textContent = 'Log in to Claude Code first';
+  }
 });
 
 var pendingWidgetUpdate = null;
@@ -211,7 +215,7 @@ document.getElementById('updateBtn').addEventListener('click', function() {
   btn.disabled = true;
   btn.classList.add('downloading');
 
-  window.electronAPI.installUpdate(pendingWidgetUpdate.downloadUrl).then(function(result) {
+  window.electronAPI.installUpdate().then(function(result) {
     if (result.success) {
       btn.textContent = 'Installing...';
       btn.classList.remove('downloading');
