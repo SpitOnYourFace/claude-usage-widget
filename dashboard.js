@@ -265,12 +265,6 @@ var chartSeriesDefs = [
   { key: 'weekSonnet', color: '#4ade80', label: 'Weekly (Sonnet)' },
 ];
 
-function hexToRgba(hex, alpha) {
-  var r = parseInt(hex.slice(1, 3), 16);
-  var g = parseInt(hex.slice(3, 5), 16);
-  var b = parseInt(hex.slice(5, 7), 16);
-  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
-}
 
 function formatChartDate(ts) {
   var d = new Date(ts);
@@ -295,13 +289,6 @@ function formatTooltipTitle(ts) {
   return monthNames[d.getMonth()] + ' ' + d.getDate() + ', ' + h12 + ':' + (min < 10 ? '0' : '') + min + ampm;
 }
 
-function makeGradient(ctx, chartArea, hex) {
-  if (!chartArea) return hexToRgba(hex, 0.15);
-  var grad = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-  grad.addColorStop(0, hexToRgba(hex, 0.18));
-  grad.addColorStop(1, hexToRgba(hex, 0));
-  return grad;
-}
 
 function drawChart() {
   var canvas = document.getElementById('historyCanvas');
@@ -463,21 +450,6 @@ function drawChart() {
         },
       },
     },
-    plugins: [{
-      id: 'gradientFill',
-      beforeDraw: function(chart) {
-        var ctx = chart.ctx;
-        var area = chart.chartArea;
-        if (!area) return;
-        for (var i = 0; i < chart.data.datasets.length; i++) {
-          var ds = chart.data.datasets[i];
-          var meta = chart.getDatasetMeta(i);
-          if (!meta.hidden) {
-            ds.backgroundColor = makeGradient(ctx, area, chartSeriesDefs[i].color);
-          }
-        }
-      },
-    }],
   });
 }
 
@@ -630,9 +602,9 @@ function updatePresetHighlights() {
 function saveAlertThresholds() {
   window.dashboardAPI.saveSettings({
     alertThresholds: {
-      session: { value: alertThresholds.session },
-      weekAll: { value: alertThresholds.weekAll },
-      weekSonnet: { value: alertThresholds.weekSonnet },
+      session: alertThresholds.session,
+      weekAll: alertThresholds.weekAll,
+      weekSonnet: alertThresholds.weekSonnet,
     },
   });
 }
@@ -812,9 +784,28 @@ function renderSettings() {
   updateRow.appendChild(updateBtn);
   container.appendChild(updateRow);
 
+  // Sign out
+  var signOutRow = el('div', 'setting-row');
+  signOutRow.appendChild(el('div', 'setting-label', 'Account'));
+  signOutRow.appendChild(el('div', 'setting-value', 'Clear cached OAuth token'));
+  var signOutBtn = el('button', 'update-btn', 'Sign Out');
+  signOutBtn.style.background = 'var(--red)';
+  signOutBtn.style.borderColor = 'var(--red)';
+  signOutBtn.addEventListener('click', function() {
+    signOutBtn.textContent = 'Signing out...';
+    signOutBtn.disabled = true;
+    window.dashboardAPI.signOut().then(function() {
+      signOutBtn.textContent = 'Signed out';
+      signOutBtn.style.background = 'var(--text-dim)';
+      signOutBtn.style.borderColor = 'var(--text-dim)';
+    });
+  });
+  signOutRow.appendChild(signOutBtn);
+  container.appendChild(signOutRow);
+
   // Version info
   var versionEl = document.getElementById('versionInfo');
-  versionEl.textContent = 'Claude Meter v' + currentAppVersion;
+  if (versionEl) versionEl.textContent = 'Claude Meter v' + currentAppVersion;
 }
 
 // --- IPC handlers ---
@@ -908,7 +899,8 @@ window.dashboardAPI.getSettings().then(function(settings) {
     if (settings.hotkey) currentDisplayHotkey = settings.hotkey;
     if (settings.version) {
       currentAppVersion = settings.version;
-      document.getElementById('sidebarVersion').textContent = 'v' + currentAppVersion;
+      var sidebarVer = document.getElementById('sidebarVersion');
+      if (sidebarVer) sidebarVer.textContent = 'v' + currentAppVersion;
     }
     if (settings.alertThresholds) {
       if (typeof settings.alertThresholds.session === 'number') {

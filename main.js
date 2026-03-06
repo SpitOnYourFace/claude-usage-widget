@@ -8,6 +8,7 @@ const {
   nativeImage,
   screen,
   powerMonitor,
+  shell,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -15,6 +16,12 @@ const https = require('https');
 const os = require('os');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+
+// --- App version (read from package.json, reliable even with asar repack) ---
+let APP_VERSION;
+try {
+  APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8')).version;
+} catch { /* ignore */ }
 
 // --- Constants ---
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -40,6 +47,8 @@ let fileWatcher = null;
 let fileChangeTimer = null;
 let dashWin = null;
 let lastAutoSync = 0;
+let lastSuccessfulSync = 0;
+const MIN_SYNC_INTERVAL = 120000; // don't hit API more than once per 2 minutes
 let usageHistory = [];
 let lastAlertTimes = { session: 0, weekAll: 0, weekSonnet: 0 };
 const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
@@ -315,7 +324,7 @@ function checkForUpdates() {
       path: url.pathname,
       method: 'GET',
       headers: {
-        'User-Agent': `claude-usage-widget/${app.getVersion()}`,
+        'User-Agent': `claude-usage-widget/${(APP_VERSION || app.getVersion())}`,
         'Accept': 'application/vnd.github.v3+json',
       },
     }, (res) => {
@@ -325,7 +334,7 @@ function checkForUpdates() {
         try {
           const data = JSON.parse(body);
           const latestTag = (data.tag_name || '').replace(/^v/, '');
-          const current = app.getVersion();
+          const current = (APP_VERSION || app.getVersion());
           if (latestTag && isNewerVersion(latestTag, current)) {
             // Find platform-appropriate installer asset
             let downloadUrl = null;
@@ -395,7 +404,7 @@ function downloadAndInstallUpdate(downloadUrl) {
         path: parsed.pathname + parsed.search,
         method: 'GET',
         headers: {
-          'User-Agent': `claude-usage-widget/${app.getVersion()}`,
+          'User-Agent': `claude-usage-widget/${(APP_VERSION || app.getVersion())}`,
         },
       }, (res) => {
         // Follow redirects (GitHub uses 302)
@@ -478,9 +487,11 @@ function downloadAndInstallUpdate(downloadUrl) {
 
 let cachedToken = null;
 let tokenLastRead = 0;
+let signedOut = false;
 const TOKEN_CACHE_MS = 5 * 60 * 1000; // re-read every 5 minutes
 
 function getAccessToken(forceRefresh) {
+  if (signedOut) return null;
   const now = Date.now();
   if (!forceRefresh && cachedToken && (now - tokenLastRead) < TOKEN_CACHE_MS) {
     return cachedToken;
@@ -500,6 +511,89 @@ function getAccessToken(forceRefresh) {
     cachedToken = null;
     return null;
   }
+}
+
+// --- Local usage estimation from JSONL files ---
+
+function estimateLocalUsage() {
+  const now = Date.now();
+  const fiveHoursAgo = now - (5 * 3600 * 1000);
+  const sevenDaysAgo = now - (7 * 24 * 3600 * 1000);
+
+  let output5h = 0, output7d = 0, outputSonnet7d = 0;
+
+  try {
+    // Scan all project dirs for JSONL files
+    const projectDirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true });
+    for (const dir of projectDirs) {
+      const dirPath = path.join(PROJECTS_DIR, dir.name);
+      let files;
+      try {
+        files = fs.readdirSync(dirPath).filter((f) => f.endsWith('.jsonl'));
+      } catch { continue; }
+
+      for (const file of files) {
+        const filePath = path.join(dirPath, file);
+        try {
+          // Skip files older than 7 days
+          const stat = fs.statSync(filePath);
+          if (stat.mtimeMs < sevenDaysAgo) continue;
+
+          const content = fs.readFileSync(filePath, 'utf-8');
+          for (const line of content.split('\n')) {
+            if (!line) continue;
+            try {
+              const d = JSON.parse(line);
+              if (d.type !== 'assistant' || !d.timestamp) continue;
+              const ts = new Date(d.timestamp).getTime();
+              if (isNaN(ts)) continue;
+
+              const usage = d.message?.usage;
+              if (!usage) continue;
+              const output = usage.output_tokens || 0;
+              const model = d.message?.model || '';
+
+              if (ts > fiveHoursAgo) output5h += output;
+              if (ts > sevenDaysAgo) {
+                output7d += output;
+                if (/sonnet/i.test(model)) outputSonnet7d += output;
+              }
+            } catch { continue; }
+          }
+        } catch { continue; }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return { output5h, output7d, outputSonnet7d, ts: now };
+}
+
+function buildLocalUsage() {
+  const local = estimateLocalUsage();
+
+  // If we have cached API data, adjust percentages based on token delta
+  if (cachedUsage && cachedUsage.syncTime) {
+    // Use cached API percentages as base — they're authoritative
+    // Just update the syncTime so the UI shows fresh data
+    return {
+      session: { ...cachedUsage.session },
+      weekAll: { ...cachedUsage.weekAll },
+      weekSonnet: { ...cachedUsage.weekSonnet },
+      extraUsage: cachedUsage.extraUsage || { enabled: false },
+      syncTime: Date.now(),
+      localEstimate: true,
+    };
+  }
+
+  // No cached data at all — return zeros
+  return {
+    session: { pct: 0, resetsAt: null, label: 'Current session' },
+    weekAll: { pct: 0, resetsAt: null, label: 'Current week (all models)' },
+    weekSonnet: { pct: 0, resetsAt: null, label: 'Current week (Sonnet only)' },
+    extraUsage: { enabled: false },
+    syncTime: Date.now(),
+    localEstimate: true,
+  };
 }
 
 // --- Fetch usage from Anthropic API ---
@@ -562,13 +656,15 @@ function fetchUsage() {
         'Authorization': `Bearer ${token}`,
         'anthropic-beta': BETA_HEADER,
         'Content-Type': 'application/json',
-        'User-Agent': `claude-usage-widget/${app.getVersion()}`,
+        'User-Agent': `claude-usage-widget/${(APP_VERSION || app.getVersion())}`,
       },
     }, (res) => {
-      // Handle rate limiting — back off for 2 minutes
+      // Handle rate limiting — back off using Retry-After or 5 minutes default
       if (res.statusCode === 429) {
         res.resume();
-        rateLimitUntil = Date.now() + 120000;
+        const retryAfter = parseInt(res.headers['retry-after'], 10);
+        const backoffMs = (retryAfter > 0 ? retryAfter * 1000 : 300000);
+        rateLimitUntil = Date.now() + backoffMs;
         finish(new Error('Rate limited'));
         return;
       }
@@ -662,6 +758,16 @@ function broadcastUsage() {
   }
 }
 
+// Smart sync — only hits API if data is stale (>2 min old)
+function syncIfStale() {
+  if (Date.now() - lastSuccessfulSync < MIN_SYNC_INTERVAL) {
+    // Data is fresh — just broadcast cached data
+    broadcastUsage();
+    return;
+  }
+  doSync();
+}
+
 async function doSync() {
   // Force-clear stale sync lock
   resetSyncIfStale();
@@ -688,6 +794,7 @@ async function doSync() {
     }
 
     cachedUsage = newUsage;
+    lastSuccessfulSync = Date.now();
     saveCachedUsage(cachedUsage);
     appendHistory(cachedUsage);
     checkAndNotify(cachedUsage);
@@ -695,16 +802,29 @@ async function doSync() {
     broadcastUsage();
     updateTrayTooltip();
   } catch (err) {
-    // Truncate error — may contain untrusted content from API response
-    // Force token re-read on next sync in case of auth error
     cachedToken = null;
     const safeMsg = typeof err.message === 'string'
       ? err.message.slice(0, 200)
       : 'Unknown error';
-    if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
-    if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
-    // Still broadcast cached data so UI isn't empty
-    if (cachedUsage) broadcastUsage();
+
+    // No token — show auth error, don't fall back to cached data
+    if (safeMsg.indexOf('OAuth') >= 0 || safeMsg.indexOf('No OAuth') >= 0) {
+      if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
+      if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
+      return;
+    }
+
+    // API failed for other reason — fall back to local data with updated syncTime
+    const localUsage = buildLocalUsage();
+    if (localUsage.session.pct > 0 || cachedUsage) {
+      cachedUsage = localUsage;
+      lastSuccessfulSync = Date.now();
+      broadcastUsage();
+      updateTrayTooltip();
+    } else {
+      if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
+      if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
+    }
   }
 }
 
@@ -879,7 +999,8 @@ function toggleWindow() {
     if (cachedUsage && !win.isDestroyed()) {
       win.webContents.send('usage-update', cachedUsage);
     }
-    doSync();
+    // Sync on open — only hits API if data is stale
+    syncIfStale();
     if (trayHasAlert) {
       trayHasAlert = false;
       if (process.platform === 'win32') {
@@ -897,7 +1018,7 @@ function openDashboard() {
     // Refresh data when re-focusing existing dashboard
     if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
     if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
-    if (Date.now() - lastAutoSync > 60000) { lastAutoSync = Date.now(); doSync(); }
+    syncIfStale();
     return;
   }
 
@@ -946,12 +1067,9 @@ function startFileWatcher() {
     const supportsRecursive = process.platform === 'win32' || process.platform === 'darwin';
     fileWatcher = fs.watch(PROJECTS_DIR, { recursive: supportsRecursive }, (_, filename) => {
       if (!filename || !/\.jsonl$/i.test(filename)) return;
-      const now = Date.now();
-      if (now - lastAutoSync < 60000) return;
       if (fileChangeTimer) clearTimeout(fileChangeTimer);
       fileChangeTimer = setTimeout(() => {
-        lastAutoSync = Date.now();
-        doSync();
+        syncIfStale();
       }, 3000);
     });
   } catch { /* ignore */ }
@@ -1000,7 +1118,10 @@ app.whenReady().then(() => {
   };
 
   // IPC
-  ipcMain.on('request-sync', () => doSync());
+  ipcMain.on('request-sync', () => {
+    rateLimitUntil = 0; // manual refresh always forces through
+    doSync();
+  });
   ipcMain.on('minimize-to-tray', () => { if (win) { saveBoundsNow(); win.hide(); } });
   ipcMain.on('quit-app', (event) => {
     if (!isLocalSender(event)) return;
@@ -1020,20 +1141,105 @@ app.whenReady().then(() => {
 
   ipcMain.on('open-dashboard', () => openDashboard());
 
-  ipcMain.on('dash-minimize', () => { if (dashWin && !dashWin.isDestroyed()) dashWin.minimize(); });
-  ipcMain.on('dash-maximize', () => {
+  // Auth status check for first-launch onboarding
+  ipcMain.handle('check-auth-status', () => {
+    const token = getAccessToken();
+    // Check if claude CLI is in PATH
+    let cliInstalled = false;
+    try {
+      const cmd = process.platform === 'win32' ? 'where' : 'which';
+      const { execFileSync } = require('child_process');
+      execFileSync(cmd, ['claude'], { stdio: 'ignore' });
+      cliInstalled = true;
+    } catch { /* not found */ }
+    return {
+      authenticated: !!token,
+      claudeCodeInstalled: cliInstalled,
+      credentialsExist: fs.existsSync(CREDS_FILE),
+    };
+  });
+
+  // Launch claude auth login from the app
+  ipcMain.handle('launch-auth-login', () => {
+    try {
+      // Find claude CLI path
+      const { execFileSync } = require('child_process');
+      const cmd = process.platform === 'win32' ? 'where' : 'which';
+      const lines = execFileSync(cmd, ['claude'], { encoding: 'utf-8' })
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      // On Windows, prefer the .cmd version (directly spawnable)
+      const claudePath = (process.platform === 'win32'
+        ? lines.find((l) => /\.cmd$/i.test(l))
+        : null) || lines[0];
+      if (!claudePath) return { success: false, error: 'Claude CLI not found' };
+
+      // spawn via shell on Windows (.cmd needs it), hidden terminal
+      const child = spawn(claudePath, ['auth', 'login'], {
+        stdio: 'ignore',
+        detached: true,
+        shell: process.platform === 'win32',
+        windowsHide: true,
+      });
+      child.unref();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Open external URL safely (only allow https)
+  ipcMain.on('open-external-url', (event, url) => {
+    if (!isLocalSender(event)) return;
+    if (typeof url === 'string' && url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
+  });
+
+  // Watch for credentials file to appear (first-time setup)
+  let credsWatcher = null;
+  function watchForCredentials() {
+    if (credsWatcher) return;
+    // Already authenticated — no need to watch
+    if (getAccessToken()) return;
+    try {
+      // Ensure directory exists before watching
+      fs.mkdirSync(CLAUDE_DIR, { recursive: true });
+      credsWatcher = fs.watch(CLAUDE_DIR, (_, filename) => {
+        if (filename === '.credentials.json') {
+          const token = getAccessToken(true);
+          if (token) {
+            // Credentials appeared — notify renderer and sync
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('auth-status-changed', { authenticated: true });
+            }
+            doSync();
+            // Stop watching
+            if (credsWatcher) { credsWatcher.close(); credsWatcher = null; }
+          }
+        }
+      });
+    } catch { /* ignore watch errors */ }
+  }
+  watchForCredentials();
+
+  ipcMain.on('dash-minimize', (event) => { if (isLocalSender(event) && dashWin && !dashWin.isDestroyed()) dashWin.minimize(); });
+  ipcMain.on('dash-maximize', (event) => {
+    if (!isLocalSender(event)) return;
     if (dashWin && !dashWin.isDestroyed()) {
       dashWin.isMaximized() ? dashWin.unmaximize() : dashWin.maximize();
     }
   });
-  ipcMain.on('dash-close', () => { if (dashWin && !dashWin.isDestroyed()) dashWin.close(); });
+  ipcMain.on('dash-close', (event) => { if (isLocalSender(event) && dashWin && !dashWin.isDestroyed()) dashWin.close(); });
 
-  ipcMain.on('dashboard-request-data', () => {
+  ipcMain.on('dashboard-request-data', (event) => {
+    if (!isLocalSender(event)) return;
     if (dashWin && !dashWin.isDestroyed()) {
       if (cachedUsage) dashWin.webContents.send('usage-update', cachedUsage);
       if (usageHistory.length > 0) dashWin.webContents.send('history-update', usageHistory);
     }
-    if (Date.now() - lastAutoSync > 60000) { lastAutoSync = Date.now(); doSync(); }
+    syncIfStale();
   });
 
   ipcMain.on('dashboard-save-settings', (event, settings) => {
@@ -1085,13 +1291,21 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', async () => {
     return {
       hotkey: currentHotkey,
-      version: app.getVersion(),
+      version: (APP_VERSION || app.getVersion()),
       alertThresholds: {
         session: ALERT_THRESHOLDS.session,
         weekAll: ALERT_THRESHOLDS.weekAll,
         weekSonnet: ALERT_THRESHOLDS.weekSonnet,
       },
     };
+  });
+
+  ipcMain.handle('sign-out', async (event) => {
+    if (!isLocalSender(event)) return { success: false, error: 'Unauthorized' };
+    cachedToken = null;
+    tokenLastRead = 0;
+    signedOut = true;
+    return { success: true };
   });
 
   ipcMain.handle('check-for-updates', async () => {
@@ -1165,20 +1379,19 @@ app.whenReady().then(() => {
     }
   });
 
-  // Send cached data on load, then sync
+  // Send cached data on load, then sync — but only if authenticated
   win.webContents.on('did-finish-load', () => {
-    if (cachedUsage) win.webContents.send('usage-update', cachedUsage);
-    if (usageHistory.length > 0) win.webContents.send('history-update', usageHistory);
-    if (!syncing) doSync();
+    const token = getAccessToken();
+    if (token) {
+      if (cachedUsage) win.webContents.send('usage-update', cachedUsage);
+      if (usageHistory.length > 0) win.webContents.send('history-update', usageHistory);
+      if (!syncing) syncIfStale();
+    }
   });
 
-  // Auto-refresh: 60s visible, 5min hidden
+  // Auto-refresh: 5min when visible, no background polling
   setInterval(() => {
-    if (win && win.isVisible()) doSync();
-  }, 60000);
-
-  setInterval(() => {
-    if (win && !win.isVisible()) doSync();
+    if (win && win.isVisible()) syncIfStale();
   }, 300000);
 
   startFileWatcher();
@@ -1199,7 +1412,7 @@ app.whenReady().then(() => {
     syncing = false;
     syncStartedAt = 0;
     activeRequest = null;
-    setTimeout(() => doSync(), 500);
+    setTimeout(() => syncIfStale(), 500);
   });
 
   // Check for updates on start, then every 24h

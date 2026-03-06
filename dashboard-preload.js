@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('dashboardAPI', {
   installUpdate: () => ipcRenderer.invoke('download-and-install-update'),
   changeHotkey: (hotkey) => ipcRenderer.invoke('change-hotkey', hotkey),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  signOut: () => ipcRenderer.invoke('sign-out'),
   onUsageUpdate: (cb) => {
     if (usageHandler) ipcRenderer.removeListener('usage-update', usageHandler);
     usageHandler = (_e, data) => cb(data);
