@@ -46,19 +46,24 @@ info "Latest version: $VERSION"
 # --- pick the right asset ---
 if [ "$PLATFORM" = "linux" ]; then
   EXT="AppImage"
-  # match dash-named assets (Claude-Meter-x.x.x.AppImage)
-  PATTERN="Claude-Meter-.*${ARCH_SUFFIX}\\.${EXT}$"
 elif [ "$PLATFORM" = "mac" ]; then
   EXT="dmg"
-  PATTERN="Claude-Meter-.*${ARCH_SUFFIX}\\.${EXT}$"
 fi
 
-ASSET_URL="$(echo "$RELEASE_JSON" \
+# For x64: match files WITHOUT arm64 in the name
+# For arm64: match files WITH arm64 in the name
+ALL_URLS="$(echo "$RELEASE_JSON" \
   | grep -o '"browser_download_url": *"[^"]*"' \
   | sed 's/"browser_download_url": *"//;s/"$//' \
-  | grep -E "$PATTERN" \
-  | grep -v '\.blockmap$' \
-  | head -1)"
+  | grep -v '\.blockmap$')"
+
+if [ -n "$ARCH_SUFFIX" ]; then
+  # arm64 — must contain -arm64
+  ASSET_URL="$(echo "$ALL_URLS" | grep -E "Claude-Meter-.*-arm64\\.${EXT}$" | head -1)"
+else
+  # x64 — must NOT contain arm64
+  ASSET_URL="$(echo "$ALL_URLS" | grep -E "Claude-Meter-.*\\.${EXT}$" | grep -v arm64 | head -1)"
+fi
 
 if [ -z "$ASSET_URL" ]; then
   err "No matching asset found for $PLATFORM $ARCH"

@@ -340,16 +340,19 @@ function checkForUpdates() {
             let downloadUrl = null;
             if (Array.isArray(data.assets)) {
               let asset = null;
+              const isArm = process.arch === 'arm64';
               if (process.platform === 'win32') {
                 asset = data.assets.find((a) =>
                   /\.exe$/i.test(a.name) && /setup/i.test(a.name)
                 );
               } else if (process.platform === 'darwin') {
-                asset = data.assets.find((a) => /\.dmg$/i.test(a.name));
+                asset = data.assets.find((a) =>
+                  /\.dmg$/i.test(a.name) && (isArm ? /arm64/i.test(a.name) : !/arm64/i.test(a.name))
+                );
               } else {
-                // Linux: prefer AppImage, fallback to .deb
-                asset = data.assets.find((a) => /\.AppImage$/i.test(a.name))
-                  || data.assets.find((a) => /\.deb$/i.test(a.name));
+                asset = data.assets.find((a) =>
+                  /\.AppImage$/i.test(a.name) && (isArm ? /arm64/i.test(a.name) : !/arm64/i.test(a.name))
+                );
               }
               if (asset) downloadUrl = asset.browser_download_url;
             }
@@ -1309,7 +1312,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('check-for-updates', async () => {
-    return checkForUpdates();
+    const result = await checkForUpdates();
+    if (result.hasUpdate) {
+      lastUpdateResult = result;
+    }
+    return result;
   });
 
   ipcMain.handle('download-and-install-update', async (event) => {
