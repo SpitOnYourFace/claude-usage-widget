@@ -9,6 +9,25 @@ function createElement(tag, cls, text) {
   return el;
 }
 
+// --- Setup overlay (first-launch onboarding) ---
+function showSetupOverlay() {
+  var overlay = document.getElementById('setupOverlay');
+  var rows = document.getElementById('usageRows');
+  var footer = document.querySelector('.footer');
+  overlay.classList.add('visible');
+  rows.style.display = 'none';
+  if (footer) footer.style.display = 'none';
+}
+
+function hideSetupOverlay() {
+  var overlay = document.getElementById('setupOverlay');
+  var rows = document.getElementById('usageRows');
+  var footer = document.querySelector('.footer');
+  overlay.classList.remove('visible');
+  rows.style.display = '';
+  if (footer) footer.style.display = '';
+}
+
 function formatResetTime(ts) {
   if (!ts) return '';
   var d = new Date(ts);
@@ -162,6 +181,7 @@ window.electronAPI.onUsageUpdate(function(data) {
   var oldData = usageData;
   usageData = data;
   lastSyncError = null; // clear error on successful sync
+  hideSetupOverlay();
   renderAll();
   setSyncStatus('live');
 
@@ -186,7 +206,7 @@ window.electronAPI.onSyncStart(function() {
 window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
   if (msg && msg.indexOf('OAuth') >= 0) {
-    lastSyncError = 'Log in to Claude Code first';
+    showSetupOverlay();
   } else if (msg) {
     lastSyncError = 'Sync failed';
   }
@@ -251,8 +271,53 @@ document.getElementById('refreshBtn').addEventListener('click', function() {
   }, 1000);
 });
 
-// Request initial data
-window.electronAPI.requestSync();
+// --- First-launch auth check ---
+window.electronAPI.checkAuthStatus().then(function(status) {
+  if (!status.authenticated) {
+    showSetupOverlay();
+    if (!status.claudeCodeInstalled) {
+      // Claude Code not installed — show install link, change button text
+      document.getElementById('setupDesc').textContent =
+        'Claude Code is required. Install it first, then sign in.';
+      document.getElementById('setupSignInBtn').style.display = 'none';
+      document.getElementById('setupInstallLink').style.display = '';
+      document.getElementById('setupInstallLink').textContent = 'Download Claude Code';
+    }
+  } else {
+    window.electronAPI.requestSync();
+  }
+});
+
+// Sign In button — launches claude auth login
+document.getElementById('setupSignInBtn').addEventListener('click', function() {
+  var btn = document.getElementById('setupSignInBtn');
+  var waiting = document.getElementById('setupWaiting');
+  btn.disabled = true;
+  btn.textContent = 'Opening browser...';
+  window.electronAPI.launchAuthLogin().then(function(result) {
+    if (result.success) {
+      btn.style.display = 'none';
+      waiting.style.display = '';
+    } else {
+      btn.textContent = 'Sign In';
+      btn.disabled = false;
+      document.getElementById('setupDesc').textContent =
+        'Could not launch login. Run "claude auth login" in a terminal.';
+    }
+  });
+});
+
+// Install Claude Code link — opens download page in browser
+document.getElementById('setupInstallLink').addEventListener('click', function() {
+  window.electronAPI.openExternalUrl('https://docs.anthropic.com/en/docs/claude-code/getting-started');
+});
+
+// Auto-hide overlay when credentials appear
+window.electronAPI.onAuthStatusChanged(function(data) {
+  if (data.authenticated) {
+    hideSetupOverlay();
+  }
+});
 
 // Update countdown + "synced X ago" every second (lightweight, no DOM rebuild)
 setInterval(function() {

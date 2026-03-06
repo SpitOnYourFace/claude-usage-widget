@@ -38,4 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => ipcRenderer.invoke('download-and-install-update'),
   toggleCompact: (isCompact) => ipcRenderer.send('toggle-compact', isCompact),
   openDashboard: () => ipcRenderer.send('open-dashboard'),
+  checkAuthStatus: () => ipcRenderer.invoke('check-auth-status'),
+  launchAuthLogin: () => ipcRenderer.invoke('launch-auth-login'),
+  openExternalUrl: (url) => ipcRenderer.send('open-external-url', url),
+  onAuthStatusChanged: (cb) => {
+    ipcRenderer.on('auth-status-changed', (_e, data) => cb(data));
+  },
 });
