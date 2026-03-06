@@ -50,8 +50,9 @@ let lastAutoSync = 0;
 let lastSuccessfulSync = 0;
 const MIN_SYNC_INTERVAL = 120000; // don't hit API more than once per 2 minutes
 let usageHistory = [];
-let lastAlertTimes = { session: 0, weekAll: 0, weekSonnet: 0 };
-const ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+// Track last alerted pct step per key (fires at threshold, then every 10%)
+let lastAlertedStep = { session: -1, weekAll: -1, weekSonnet: -1 };
+let alertPopup = null;
 const ALERT_THRESHOLDS = { session: 80, weekAll: 90, weekSonnet: 90 };
 let trayHasAlert = false;
 
@@ -213,47 +214,100 @@ function saveSettings() {
   } catch { /* ignore */ }
 }
 
-// --- Desktop notifications ---
+// --- Alert popup ---
+
+function getAlertStep(pct, threshold) {
+  // Returns which 10% step above threshold we're at (0 = at threshold, 1 = +10%, etc.)
+  if (pct < threshold) return -1;
+  return Math.floor((pct - threshold) / 10);
+}
+
+function showAlertPopup(label, pct, resetsAt) {
+  if (alertPopup && !alertPopup.isDestroyed()) {
+    alertPopup.close();
+    alertPopup = null;
+  }
+
+  const display = screen.getPrimaryDisplay();
+  const { width: sw, height: sh } = display.workAreaSize;
+  const popW = 320;
+  const popH = 200;
+  const severity = pct >= 85 ? 'danger' : 'warning';
+
+  alertPopup = new BrowserWindow({
+    width: popW,
+    height: popH,
+    x: sw - popW - 20,
+    y: sh - popH - 20,
+    frame: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: '#0c0c12',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  alertPopup.on('closed', () => { alertPopup = null; });
+
+  alertPopup.once('ready-to-show', () => {
+    if (alertPopup && !alertPopup.isDestroyed()) {
+      alertPopup.showInactive();
+    }
+  });
+
+  alertPopup.loadFile(path.join(__dirname, 'popup.html'));
+
+  alertPopup.webContents.once('did-finish-load', () => {
+    if (!alertPopup || alertPopup.isDestroyed()) return;
+
+    let resetText = '';
+    if (resetsAt) {
+      const diff = new Date(resetsAt).getTime() - Date.now();
+      if (diff > 0) {
+        const hours = Math.floor(diff / 3600000);
+        const mins = Math.floor((diff % 3600000) / 60000);
+        resetText = hours > 0 ? `Resets in ${hours}h ${mins}m` : `Resets in ${mins}m`;
+      }
+    }
+
+    const js = `
+      (function() {
+        var s = '${severity}';
+        document.getElementById('popup').className = 'popup ' + s;
+        document.getElementById('icon').textContent = s === 'danger' ? '\\u26A0' : '\\u26A1';
+        document.getElementById('title').textContent = '${label} at ${pct}%';
+        document.getElementById('subtitle').textContent = 'Usage threshold exceeded';
+        document.getElementById('barLabel').textContent = '${label}';
+        document.getElementById('barPct').textContent = '${pct}%';
+        document.getElementById('resetInfo').textContent = '${resetText}';
+        setTimeout(function() {
+          document.getElementById('bf').style.width = '${pct}%';
+        }, 50);
+      })();
+    `;
+    alertPopup.webContents.executeJavaScript(js).catch(() => {});
+  });
+}
 
 function checkAndNotify(usage) {
-  const { Notification } = require('electron');
-  if (!Notification.isSupported()) return;
-
   const checks = [
     { key: 'session', pct: usage.session.pct, label: 'Session', resetsAt: usage.session.resetsAt },
     { key: 'weekAll', pct: usage.weekAll.pct, label: 'Weekly (all)', resetsAt: usage.weekAll.resetsAt },
     { key: 'weekSonnet', pct: usage.weekSonnet.pct, label: 'Weekly (Sonnet)', resetsAt: usage.weekSonnet.resetsAt },
   ];
 
-  const now = Date.now();
   for (const check of checks) {
-    if (check.pct >= ALERT_THRESHOLDS[check.key]
-      && (now - lastAlertTimes[check.key]) > ALERT_COOLDOWN_MS) {
-      lastAlertTimes[check.key] = now;
-
-      let body = `Claude ${check.label} usage at ${check.pct}%`;
-      if (check.resetsAt) {
-        const diff = new Date(check.resetsAt).getTime() - now;
-        if (diff > 0) {
-          const hours = Math.floor(diff / 3600000);
-          const mins = Math.floor((diff % 3600000) / 60000);
-          body += hours > 0
-            ? ` \u2014 resets in ${hours}h ${mins}m`
-            : ` \u2014 resets in ${mins}m`;
-        }
-      }
-
-      const notif = new Notification({
-        title: 'Claude Meter Alert',
-        body,
-        icon: getAssetPath('icon.png'),
-        silent: false,
-      });
-      notif.on('click', () => {
-        if (win && !win.isVisible()) toggleWindow();
-      });
-      notif.show();
+    const step = getAlertStep(check.pct, ALERT_THRESHOLDS[check.key]);
+    if (step >= 0 && step !== lastAlertedStep[check.key]) {
+      lastAlertedStep[check.key] = step;
+      showAlertPopup(check.label, check.pct, check.resetsAt);
     }
+    // Reset tracking when usage drops below threshold
+    if (step < 0) lastAlertedStep[check.key] = -1;
   }
 }
 
@@ -1433,6 +1487,7 @@ app.whenReady().then(() => {
 
   setTimeout(async () => broadcastUpdate(await checkForUpdates()), 10000);
   setInterval(async () => broadcastUpdate(await checkForUpdates()), UPDATE_CHECK_INTERVAL);
+
 });
 
 app.on('will-quit', () => {

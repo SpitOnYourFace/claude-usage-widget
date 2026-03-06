@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>Claude Meter Alert</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0c0c12;
+    --surface: #13131d;
+    --border: #2a2a3d;
+    --text: #e2e2f0;
+    --text-dim: #7e7e98;
+    --yellow: #facc15;
+    --red: #f87171;
+    --bar-bg: #252538;
+  }
+  body {
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    user-select: none;
+  }
+  .popup {
+    border-radius: 14px;
+    padding: 18px 20px 16px;
+    position: relative;
+    overflow: hidden;
+    animation: pop-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes pop-in {
+    0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .popup.warning { border: 1px solid rgba(250, 204, 21, 0.3); }
+  .popup.danger { border: 1px solid rgba(248, 113, 113, 0.3); }
+
+  .popup::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.02), transparent);
+    animation: shimmer 3s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
+
+  .popup.warning::after, .popup.danger::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 20px; right: 20px;
+    height: 1px;
+    opacity: 0.5;
+  }
+  .popup.warning::after { background: linear-gradient(90deg, transparent, var(--yellow), transparent); }
+  .popup.danger::after { background: linear-gradient(90deg, transparent, var(--red), transparent); }
+
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .icon {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .warning .icon { background: rgba(250, 204, 21, 0.12); box-shadow: 0 0 14px rgba(250, 204, 21, 0.15); }
+  .danger .icon {
+    background: rgba(248, 113, 113, 0.12);
+    box-shadow: 0 0 14px rgba(248, 113, 113, 0.15);
+    animation: icon-pulse 2s ease-in-out infinite;
+  }
+  @keyframes icon-pulse {
+    0%, 100% { box-shadow: 0 0 14px rgba(248, 113, 113, 0.15); }
+    50% { box-shadow: 0 0 22px rgba(248, 113, 113, 0.35); }
+  }
+
+  .title { font-size: 13px; font-weight: 700; }
+  .warning .title { color: var(--yellow); }
+  .danger .title { color: var(--red); }
+  .subtitle {
+    font-size: 10px; color: var(--text-dim); margin-top: 2px;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+
+  .bar-section { margin-bottom: 14px; }
+  .bar-label {
+    font-size: 11px; font-weight: 600; margin-bottom: 5px;
+    display: flex; justify-content: space-between;
+  }
+  .bar-pct {
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px; font-weight: 700;
+  }
+  .warning .bar-pct { color: var(--yellow); }
+  .danger .bar-pct { color: var(--red); }
+  .bar-track { height: 6px; background: var(--bar-bg); border-radius: 3px; overflow: hidden; }
+  .bar-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 0%;
+  }
+  .warning .bar-fill { background: var(--yellow); }
+  .danger .bar-fill { background: var(--red); }
+  .reset-info {
+    font-size: 10px; color: var(--text-dim); margin-top: 4px;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+
+  .dismiss {
+    display: block; width: 100%; padding: 8px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--text-dim);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; transition: all 0.15s;
+    text-align: center; margin-top: 4px;
+  }
+  .dismiss:hover { color: var(--text); border-color: var(--text-dim); }
+
+  .countdown { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; }
+  .countdown-fill {
+    height: 100%;
+    border-radius: 0 0 14px 14px;
+    width: 100%;
+    animation: cd 8s linear forwards;
+  }
+  .warning .countdown-fill { background: rgba(250, 204, 21, 0.3); }
+  .danger .countdown-fill { background: rgba(248, 113, 113, 0.3); }
+  @keyframes cd { from { width: 100%; } to { width: 0%; } }
+</style>
+</head>
+<body>
+<div class="popup" id="popup">
+  <div class="header">
+    <div class="icon" id="icon"></div>
+    <div class="header-text">
+      <div class="title" id="title"></div>
+      <div class="subtitle" id="subtitle"></div>
+    </div>
+  </div>
+  <div class="bar-section">
+    <div class="bar-label">
+      <span id="barLabel"></span>
+      <span class="bar-pct" id="barPct"></span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-fill" id="bf"></div>
+    </div>
+    <div class="reset-info" id="resetInfo"></div>
+  </div>
+  <button class="dismiss" id="dismissBtn">Dismiss</button>
+  <div class="countdown">
+    <div class="countdown-fill" id="countdownFill"></div>
+  </div>
+</div>
+<script>
+  document.getElementById('dismissBtn').addEventListener('click', function() {
+    window.close();
+  });
+  setTimeout(function() { window.close(); }, 8000);
+</script>
+</body>
+</html>

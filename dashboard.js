@@ -788,9 +788,17 @@ function renderSettings() {
       if (result && result.hasUpdate) {
         updateCheckResult = result;
         while (banner.firstChild) banner.removeChild(banner.firstChild);
-        banner.appendChild(document.createTextNode(
-          'Update available: v' + result.latestVersion
-        ));
+        var icon = document.createElement('div');
+        icon.className = 'update-banner-icon';
+        icon.textContent = '\u2B06';
+        banner.appendChild(icon);
+        var txt = document.createElement('div');
+        txt.className = 'update-banner-text';
+        txt.appendChild(document.createTextNode('v' + result.latestVersion + ' available'));
+        var sub = document.createElement('span');
+        sub.textContent = 'New version ready to install';
+        txt.appendChild(sub);
+        banner.appendChild(txt);
         banner.classList.add('visible');
         updateBtn.textContent = 'Update to v' + result.latestVersion;
         updateBtn.disabled = false;
@@ -879,7 +887,22 @@ window.dashboardAPI.onUpdateAvailable(function(data) {
   btn.textContent = 'Update to v' + data.latestVersion;
   btn.classList.add('visible');
   var ver = document.getElementById('sidebarVersion');
-  ver.textContent = 'v' + currentAppVersion + ' — update available';
+  ver.textContent = 'v' + currentAppVersion + ' \u2192 v' + data.latestVersion;
+  // Populate overview banner
+  var banner = document.getElementById('updateBanner');
+  while (banner.firstChild) banner.removeChild(banner.firstChild);
+  var icon = document.createElement('div');
+  icon.className = 'update-banner-icon';
+  icon.textContent = '\u2B06';
+  banner.appendChild(icon);
+  var txt = document.createElement('div');
+  txt.className = 'update-banner-text';
+  txt.appendChild(document.createTextNode('v' + data.latestVersion + ' available'));
+  var sub = document.createElement('span');
+  sub.textContent = 'New version ready to install';
+  txt.appendChild(sub);
+  banner.appendChild(txt);
+  banner.classList.add('visible');
 });
 
 window.dashboardAPI.onUpdateProgress(function(pct) {
