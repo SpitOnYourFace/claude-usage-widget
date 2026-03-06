@@ -1493,6 +1493,10 @@ app.whenReady().then(() => {
       if (usageHistory.length > 0) win.webContents.send('history-update', usageHistory);
       if (!syncing) syncIfStale();
     }
+    // Re-send cached update result so renderer never misses it
+    if (lastUpdateResult && lastUpdateResult.hasUpdate) {
+      win.webContents.send('update-available', lastUpdateResult);
+    }
   });
 
   // Auto-refresh: 5min when visible, no background polling
