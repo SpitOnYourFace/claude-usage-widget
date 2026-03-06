@@ -22,31 +22,23 @@ A desktop meter that shows your **real-time Claude Pro/Max subscription usage** 
 
 ## Install
 
-Download the latest release for your platform from [**Releases**](../../releases/latest).
+### Linux / macOS (one-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SpitOnYourFace/claude-usage-widget/master/install.sh | bash
+```
+
+This auto-detects your OS and architecture, downloads the latest release, removes old versions, and installs it. On Linux it installs to `~/.local/bin/claude-meter`; on macOS it copies to `/Applications`.
 
 ### Windows
 
-1. Download `Claude.Meter.Setup.x.x.x.exe`
-2. Run the installer
-3. The widget starts in the system tray — press **Ctrl+\\** to show it
-4. Right-click the tray icon and enable **"Start on Login"** to auto-start on boot
+Download and run the latest installer from [**Releases**](https://github.com/SpitOnYourFace/claude-usage-widget/releases/latest).
 
-### macOS
+The installer automatically removes old versions before installing.
 
-1. Download the `.dmg` for your Mac:
-   - **Apple Silicon** (M1/M2/M3/M4): `*-arm64.dmg`
-   - **Intel**: `*.dmg` (without arm64)
-2. Open the `.dmg` and drag the app to Applications
-3. Launch the app — press **Ctrl+\\** to show the widget
+### Manual download
 
-### Linux
-
-1. Download the `.AppImage` for your architecture:
-   - **x64**: `*.AppImage` (without arm64)
-   - **ARM64**: `*-arm64.AppImage`
-2. Make it executable: `chmod +x *.AppImage`
-3. Run it: `./Claude.Meter-*.AppImage`
-4. Press **Ctrl+\\** to show the widget
+All platform builds (AppImage, dmg, exe) are available on the [**Releases**](https://github.com/SpitOnYourFace/claude-usage-widget/releases/latest) page.
 
 ### From source
 

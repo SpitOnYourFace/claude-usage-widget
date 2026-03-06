@@ -746,7 +746,39 @@ function renderSettings() {
   var updateMeta = el('div', 'setting-value', 'Current version: v' + currentAppVersion);
   updateRow.appendChild(updateMeta);
   var updateBtn = el('button', 'update-btn', 'Check for Updates');
+  var updateCheckResult = null;
   updateBtn.addEventListener('click', function() {
+    // If we already found an update, trigger download
+    if (updateCheckResult && updateCheckResult.hasUpdate) {
+      if (!updateCheckResult.downloadUrl) {
+        updateBtn.textContent = 'No installer found';
+        setTimeout(function() {
+          updateBtn.textContent = 'Update to v' + updateCheckResult.latestVersion;
+        }, 3000);
+        return;
+      }
+      updateBtn.textContent = 'Downloading...';
+      updateBtn.disabled = true;
+      updateBtn.classList.add('downloading');
+      document.getElementById('updateProgress').classList.add('visible');
+      window.dashboardAPI.installUpdate().then(function(result) {
+        if (result.success) {
+          updateBtn.textContent = 'Installing...';
+          updateBtn.classList.remove('downloading');
+        } else {
+          updateBtn.textContent = 'Failed — retry';
+          updateBtn.classList.remove('downloading');
+          document.getElementById('updateProgress').classList.remove('visible');
+          setTimeout(function() {
+            updateBtn.textContent = 'Update to v' + updateCheckResult.latestVersion;
+            updateBtn.disabled = false;
+          }, 3000);
+        }
+      });
+      return;
+    }
+
+    // First click — check for updates
     updateBtn.textContent = 'Checking...';
     updateBtn.disabled = true;
     updateBtn.style.background = '';
@@ -754,12 +786,13 @@ function renderSettings() {
     window.dashboardAPI.checkForUpdates().then(function(result) {
       var banner = document.getElementById('updateBanner');
       if (result && result.hasUpdate) {
+        updateCheckResult = result;
         while (banner.firstChild) banner.removeChild(banner.firstChild);
         banner.appendChild(document.createTextNode(
           'Update available: v' + result.latestVersion
         ));
         banner.classList.add('visible');
-        updateBtn.textContent = 'Update available: v' + result.latestVersion;
+        updateBtn.textContent = 'Update to v' + result.latestVersion;
         updateBtn.disabled = false;
       } else {
         updateBtn.textContent = 'Up to date';
