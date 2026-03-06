@@ -964,20 +964,9 @@ function setAutoStartEnabled(enabled) {
 }
 
 function buildTrayMenu() {
-  const isAutoStart = getAutoStartEnabled();
   return Menu.buildFromTemplate([
     { label: 'Show  (' + currentHotkey + ')', click: () => toggleWindow() },
-    { label: 'Sync Now', click: () => doSync() },
     { label: 'Dashboard', click: () => openDashboard() },
-    { type: 'separator' },
-    {
-      label: 'Start on Login',
-      type: 'checkbox',
-      checked: isAutoStart,
-      click: (item) => {
-        setAutoStartEnabled(item.checked);
-      },
-    },
     { type: 'separator' },
     { label: 'Quit', click: () => { if (win && !win.isDestroyed()) win.destroy(); app.quit(); } },
   ]);
@@ -1269,6 +1258,7 @@ app.whenReady().then(() => {
           const token = getAccessToken(true);
           if (token) {
             // Credentials appeared — notify renderer and sync
+            signedOut = false;
             if (win && !win.isDestroyed()) {
               win.webContents.send('auth-status-changed', { authenticated: true });
             }
@@ -1363,7 +1353,24 @@ app.whenReady().then(() => {
     cachedToken = null;
     tokenLastRead = 0;
     signedOut = true;
+    // Show widget with login overlay
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('auth-status-changed', { authenticated: false });
+      win.show();
+    }
+    // Watch for re-authentication
+    watchForCredentials();
     return { success: true };
+  });
+
+  ipcMain.handle('get-autostart', async () => {
+    return { enabled: getAutoStartEnabled() };
+  });
+
+  ipcMain.handle('set-autostart', async (event, enabled) => {
+    if (!isLocalSender(event)) return { success: false };
+    setAutoStartEnabled(enabled);
+    return { success: true, enabled: getAutoStartEnabled() };
   });
 
   ipcMain.handle('check-for-updates', async () => {
@@ -1406,12 +1413,25 @@ app.whenReady().then(() => {
             stdio: 'ignore',
           }).unref();
         } else if (process.platform === 'linux' && /\.AppImage$/i.test(installerPath)) {
-          // Linux AppImage: make executable then launch
+          // Linux AppImage: replace the running AppImage, then relaunch
           fs.chmodSync(installerPath, 0o755);
-          spawn(installerPath, [], {
-            detached: true,
-            stdio: 'ignore',
-          }).unref();
+          const currentAppImage = process.env.APPIMAGE;
+          if (currentAppImage) {
+            // Copy new AppImage over the current one
+            fs.copyFileSync(installerPath, currentAppImage);
+            fs.chmodSync(currentAppImage, 0o755);
+            fs.unlinkSync(installerPath);
+            spawn(currentAppImage, [], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref();
+          } else {
+            // Not running as AppImage (dev mode) — just launch from tmp
+            spawn(installerPath, [], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref();
+          }
         } else {
           // Windows .exe or Linux .deb (deb handled via dpkg/gdebi by user)
           if (process.platform === 'linux' && /\.deb$/i.test(installerPath)) {

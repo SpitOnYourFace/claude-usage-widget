@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('dashboardAPI', {
   changeHotkey: (hotkey) => ipcRenderer.invoke('change-hotkey', hotkey),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   signOut: () => ipcRenderer.invoke('sign-out'),
+  getAutostart: () => ipcRenderer.invoke('get-autostart'),
+  setAutostart: (enabled) => ipcRenderer.invoke('set-autostart', enabled),
   onUsageUpdate: (cb) => {
     if (usageHandler) ipcRenderer.removeListener('usage-update', usageHandler);
     usageHandler = (_e, data) => cb(data);

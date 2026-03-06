@@ -498,14 +498,11 @@ function renderAlerts() {
   var container = document.getElementById('alertRows');
   while (container.firstChild) container.removeChild(container.firstChild);
 
-  // Preset buttons
   var presets = [
-    { label: 'Conservative 60%', session: 60, weekAll: 60, weekSonnet: 60 },
-    { label: 'Standard 80%', session: 80, weekAll: 90, weekSonnet: 90 },
-    { label: 'Aggressive 95%', session: 95, weekAll: 95, weekSonnet: 95 },
+    { icon: '\uD83D\uDEE1', label: 'Relaxed', session: 60, weekAll: 60, weekSonnet: 60 },
+    { icon: '\u2696', label: 'Standard', session: 80, weekAll: 90, weekSonnet: 90 },
+    { icon: '\u26A1', label: 'Aggressive', session: 95, weekAll: 95, weekSonnet: 95 },
   ];
-
-  var presetsRow = el('div', 'alert-presets');
 
   function isPresetActive(preset) {
     return alertThresholds.session === preset.session
@@ -513,9 +510,13 @@ function renderAlerts() {
       && alertThresholds.weekSonnet === preset.weekSonnet;
   }
 
+  var presetsRow = el('div', 'alert-presets');
   for (var p = 0; p < presets.length; p++) {
     (function(preset) {
-      var chip = el('button', 'preset-chip', preset.label);
+      var chip = el('button', 'preset-chip');
+      var iconSpan = el('span', 'preset-icon', preset.icon);
+      chip.appendChild(iconSpan);
+      chip.appendChild(document.createTextNode(preset.label));
       if (isPresetActive(preset)) chip.classList.add('active');
       chip.addEventListener('click', function() {
         alertThresholds.session = preset.session;
@@ -527,51 +528,67 @@ function renderAlerts() {
       presetsRow.appendChild(chip);
     })(presets[p]);
   }
-
   container.appendChild(presetsRow);
 
-  // Per-metric fine-tuning rows
   var alerts = [
-    { key: 'session', label: 'Session usage alert' },
-    { key: 'weekAll', label: 'Weekly (all models) alert' },
-    { key: 'weekSonnet', label: 'Weekly (Sonnet) alert' },
+    { key: 'session', label: 'Session' },
+    { key: 'weekAll', label: 'Weekly (all)' },
+    { key: 'weekSonnet', label: 'Weekly (Sonnet)' },
   ];
 
   for (var i = 0; i < alerts.length; i++) {
     (function(alert) {
       var row = el('div', 'alert-row');
-      row.appendChild(el('div', 'alert-label', alert.label));
+      var header = el('div', 'alert-row-header');
+      header.appendChild(el('div', 'alert-label', alert.label));
+      var valueEl = el('div', 'alert-value', alertThresholds[alert.key] + '%');
+      header.appendChild(valueEl);
+      row.appendChild(header);
 
-      var controls = el('div', 'alert-controls');
+      // Slider
+      var track = el('div', 'alert-slider-track');
+      var fill = el('div', 'alert-slider-fill');
+      var thumb = el('div', 'alert-slider-thumb');
+      var pct = alertThresholds[alert.key];
+      fill.style.width = pct + '%';
+      thumb.style.left = pct + '%';
+      track.appendChild(fill);
+      track.appendChild(thumb);
 
-      var minusBtn = el('button', 'alert-btn', '\u2212');
-      var valueEl = el('span', 'alert-value', alertThresholds[alert.key] + '%');
-      var plusBtn = el('button', 'alert-btn', '+');
+      function updateFromX(clientX) {
+        var rect = track.getBoundingClientRect();
+        var raw = (clientX - rect.left) / rect.width;
+        var val = Math.round(Math.min(100, Math.max(5, raw * 100)) / 5) * 5;
+        alertThresholds[alert.key] = val;
+        fill.style.width = val + '%';
+        thumb.style.left = val + '%';
+        valueEl.textContent = val + '%';
+      }
 
-      minusBtn.addEventListener('click', function() {
-        var val = alertThresholds[alert.key];
-        if (val > 5) {
-          alertThresholds[alert.key] = val - 5;
-          valueEl.textContent = alertThresholds[alert.key] + '%';
+      track.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        updateFromX(e.clientX);
+        function onMove(ev) { updateFromX(ev.clientX); }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
           saveAlertThresholds();
           updatePresetHighlights();
         }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
       });
 
-      plusBtn.addEventListener('click', function() {
-        var val = alertThresholds[alert.key];
-        if (val < 100) {
-          alertThresholds[alert.key] = val + 5;
-          valueEl.textContent = alertThresholds[alert.key] + '%';
-          saveAlertThresholds();
-          updatePresetHighlights();
-        }
-      });
+      row.appendChild(track);
 
-      controls.appendChild(minusBtn);
-      controls.appendChild(valueEl);
-      controls.appendChild(plusBtn);
-      row.appendChild(controls);
+      // Tick marks
+      var ticks = el('div', 'alert-ticks');
+      var tickValues = [0, 25, 50, 75, 100];
+      for (var t = 0; t < tickValues.length; t++) {
+        ticks.appendChild(el('span', 'alert-tick', tickValues[t] + '%'));
+      }
+      row.appendChild(ticks);
+
       container.appendChild(row);
     })(alerts[i]);
   }
@@ -590,11 +607,8 @@ function updatePresetHighlights() {
       var match = alertThresholds.session === p.session
         && alertThresholds.weekAll === p.weekAll
         && alertThresholds.weekSonnet === p.weekSonnet;
-      if (match) {
-        chips[i].classList.add('active');
-      } else {
-        chips[i].classList.remove('active');
-      }
+      if (match) chips[i].classList.add('active');
+      else chips[i].classList.remove('active');
     }
   }
 }
@@ -649,7 +663,9 @@ function renderSettings() {
 
   // Hotkey setting
   var hotkeyRow = el('div', 'setting-row');
-  hotkeyRow.appendChild(el('div', 'setting-label', 'Toggle widget'));
+  var hotkeyInfo = el('div', 'setting-info');
+  hotkeyInfo.appendChild(el('div', 'setting-label', 'Toggle widget'));
+  hotkeyRow.appendChild(hotkeyInfo);
 
   var hotkeyContainer = el('div', 'hotkey-container');
   var hotkeyDisplay = el('div', 'hotkey-display', currentDisplayHotkey);
@@ -736,15 +752,34 @@ function renderSettings() {
 
   // Auto-start setting
   var autoRow = el('div', 'setting-row');
-  autoRow.appendChild(el('div', 'setting-label', 'Start on login'));
-  autoRow.appendChild(el('div', 'setting-value', 'Configurable via tray menu'));
+  var autoInfo = el('div', 'setting-info');
+  autoInfo.appendChild(el('div', 'setting-label', 'Start on login'));
+  autoInfo.appendChild(el('div', 'setting-value', 'Launch automatically when you log in'));
+  autoRow.appendChild(autoInfo);
+  var toggleWrap = el('label', 'toggle');
+  var toggleInput = document.createElement('input');
+  toggleInput.type = 'checkbox';
+  toggleInput.className = 'toggle-input';
+  var toggleSlider = el('span', 'toggle-slider');
+  toggleWrap.appendChild(toggleInput);
+  toggleWrap.appendChild(toggleSlider);
+  autoRow.appendChild(toggleWrap);
   container.appendChild(autoRow);
+  // Load current state
+  window.dashboardAPI.getAutostart().then(function(result) {
+    toggleInput.checked = result.enabled;
+  });
+  toggleInput.addEventListener('change', function() {
+    window.dashboardAPI.setAutostart(toggleInput.checked);
+  });
 
   // Check for updates
   var updateRow = el('div', 'setting-row');
-  updateRow.appendChild(el('div', 'setting-label', 'Updates'));
+  var updateInfo = el('div', 'setting-info');
+  updateInfo.appendChild(el('div', 'setting-label', 'Updates'));
   var updateMeta = el('div', 'setting-value', 'Current version: v' + currentAppVersion);
-  updateRow.appendChild(updateMeta);
+  updateInfo.appendChild(updateMeta);
+  updateRow.appendChild(updateInfo);
   var updateBtn = el('button', 'update-btn', 'Check for Updates');
   var updateCheckResult = null;
   updateBtn.addEventListener('click', function() {
@@ -803,14 +838,16 @@ function renderSettings() {
         updateBtn.textContent = 'Update to v' + result.latestVersion;
         updateBtn.disabled = false;
       } else {
-        updateBtn.textContent = 'Up to date';
-        updateBtn.style.background = 'var(--green)';
-        updateBtn.style.borderColor = 'var(--green)';
+        updateBtn.textContent = '\u2713 Up to date';
+        updateBtn.style.background = 'rgba(74, 222, 128, 0.12)';
+        updateBtn.style.borderColor = 'rgba(74, 222, 128, 0.25)';
+        updateBtn.style.color = '#4ade80';
         updateBtn.disabled = true;
         setTimeout(function() {
           updateBtn.textContent = 'Check for Updates';
           updateBtn.style.background = '';
           updateBtn.style.borderColor = '';
+          updateBtn.style.color = '';
           updateBtn.disabled = false;
         }, 5000);
       }
@@ -827,8 +864,10 @@ function renderSettings() {
 
   // Sign out
   var signOutRow = el('div', 'setting-row');
-  signOutRow.appendChild(el('div', 'setting-label', 'Account'));
-  signOutRow.appendChild(el('div', 'setting-value', 'Clear cached OAuth token'));
+  var signOutInfo = el('div', 'setting-info');
+  signOutInfo.appendChild(el('div', 'setting-label', 'Account'));
+  signOutInfo.appendChild(el('div', 'setting-value', 'Clear cached OAuth token'));
+  signOutRow.appendChild(signOutInfo);
   var signOutBtn = el('button', 'update-btn', 'Sign Out');
   signOutBtn.style.background = 'var(--red)';
   signOutBtn.style.borderColor = 'var(--red)';

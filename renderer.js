@@ -321,6 +321,8 @@ document.getElementById('setupInstallLink').addEventListener('click', function()
 window.electronAPI.onAuthStatusChanged(function(data) {
   if (data.authenticated) {
     hideSetupOverlay();
+  } else {
+    showSetupOverlay();
   }
 });
 
