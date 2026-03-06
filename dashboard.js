@@ -255,24 +255,57 @@ function renderPlanner() {
   container.appendChild(rec);
 }
 
-// --- History chart ---
+// --- History chart (Chart.js) ---
+
+var usageChart = null;
+
+var chartSeriesDefs = [
+  { key: 'session', color: '#d4845a', label: 'Session' },
+  { key: 'weekAll', color: '#7c7cba', label: 'Weekly (all)' },
+  { key: 'weekSonnet', color: '#4ade80', label: 'Weekly (Sonnet)' },
+];
+
+function hexToRgba(hex, alpha) {
+  var r = parseInt(hex.slice(1, 3), 16);
+  var g = parseInt(hex.slice(3, 5), 16);
+  var b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function formatChartDate(ts) {
+  var d = new Date(ts);
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (chartDays <= 7) {
+    var h = d.getHours();
+    var ampm = h >= 12 ? 'pm' : 'am';
+    var h12 = h % 12 || 12;
+    return dayNames[d.getDay()] + ' ' + h12 + ampm;
+  }
+  return monthNames[d.getMonth()] + ' ' + d.getDate();
+}
+
+function formatTooltipTitle(ts) {
+  var d = new Date(ts);
+  var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var h = d.getHours();
+  var ampm = h >= 12 ? 'pm' : 'am';
+  var h12 = h % 12 || 12;
+  var min = d.getMinutes();
+  return monthNames[d.getMonth()] + ' ' + d.getDate() + ', ' + h12 + ':' + (min < 10 ? '0' : '') + min + ampm;
+}
+
+function makeGradient(ctx, chartArea, hex) {
+  if (!chartArea) return hexToRgba(hex, 0.15);
+  var grad = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+  grad.addColorStop(0, hexToRgba(hex, 0.18));
+  grad.addColorStop(1, hexToRgba(hex, 0));
+  return grad;
+}
 
 function drawChart() {
   var canvas = document.getElementById('historyCanvas');
   if (!canvas) return;
-
-  var rect = canvas.parentElement.getBoundingClientRect();
-  var dpr = window.devicePixelRatio || 1;
-  var w = rect.width - 40; // account for padding
-  var h = 320;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
-
-  var ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   // Filter data by chartDays
   var cutoff = Date.now() - chartDays * 24 * 60 * 60 * 1000;
@@ -283,169 +316,209 @@ function drawChart() {
     }
   }
 
-  var padL = 40, padR = 16, padT = 16, padB = 50;
-  var chartW = w - padL - padR;
-  var chartH = h - padT - padB;
+  // Build labels and datasets
+  var labels = [];
+  var datasets = [];
+  for (var s = 0; s < chartSeriesDefs.length; s++) {
+    datasets.push([]);
+  }
+  for (var p = 0; p < points.length; p++) {
+    labels.push(points[p].ts);
+    for (var s2 = 0; s2 < chartSeriesDefs.length; s2++) {
+      datasets[s2].push(points[p][chartSeriesDefs[s2].key]);
+    }
+  }
 
-  // Grid lines
-  ctx.strokeStyle = '#2a2a3d';
-  ctx.lineWidth = 1;
-  ctx.fillStyle = '#7e7e98';
-  ctx.font = '11px monospace';
-  ctx.textAlign = 'right';
+  var chartDatasets = [];
+  for (var d = 0; d < chartSeriesDefs.length; d++) {
+    var def = chartSeriesDefs[d];
+    chartDatasets.push({
+      label: def.label,
+      data: datasets[d],
+      borderColor: def.color,
+      backgroundColor: def.color,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 5,
+      pointHoverBackgroundColor: def.color,
+      pointHoverBorderColor: '#fff',
+      pointHoverBorderWidth: 2,
+      tension: 0.35,
+      fill: false,
+    });
+  }
 
-  var gridLines = [0, 25, 50, 75, 100];
-  for (var g = 0; g < gridLines.length; g++) {
-    var gy = padT + chartH - (gridLines[g] / 100) * chartH;
-    ctx.beginPath();
-    ctx.moveTo(padL, gy);
-    ctx.lineTo(padL + chartW, gy);
-    ctx.stroke();
-    ctx.fillText(gridLines[g] + '%', padL - 6, gy + 4);
+  // Destroy old chart if exists
+  if (usageChart) {
+    usageChart.destroy();
+    usageChart = null;
   }
 
   if (points.length < 2) {
-    ctx.fillStyle = '#7e7e98';
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Not enough data yet', w / 2, h / 2);
+    var ctx2d = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 320 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '320px';
+    ctx2d.scale(dpr, dpr);
+    ctx2d.clearRect(0, 0, rect.width, 320);
+    ctx2d.fillStyle = '#7e7e98';
+    ctx2d.font = '14px sans-serif';
+    ctx2d.textAlign = 'center';
+    ctx2d.fillText('Not enough data yet', rect.width / 2, 160);
     return;
   }
 
-  // Time range
-  var minTs = points[0].ts;
-  var maxTs = points[points.length - 1].ts;
-  var tsRange = maxTs - minTs || 1;
-
-  // X-axis date/time labels
-  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  function getXTicks() {
-    var ticks = [];
-    // Use the full chart range (cutoff to now) for even tick distribution
-    var rangeStart = new Date(minTs);
-    var rangeEnd = new Date(maxTs);
-
-    var stepDays;
-    if (chartDays <= 7) {
-      stepDays = 1;
-    } else if (chartDays <= 14) {
-      stepDays = 2;
-    } else {
-      stepDays = 7;
-    }
-
-    // Start from midnight of the first day after range start
-    var d = new Date(rangeStart);
-    d.setHours(0, 0, 0, 0);
-    d = new Date(d.getTime() + 24 * 60 * 60 * 1000);
-
-    while (d.getTime() <= rangeEnd.getTime()) {
-      var label;
-      if (chartDays <= 7) {
-        label = dayNames[d.getDay()];
-      } else {
-        label = monthNames[d.getMonth()] + ' ' + d.getDate();
-      }
-      ticks.push({ ts: d.getTime(), label: label });
-      d = new Date(d.getTime() + stepDays * 24 * 60 * 60 * 1000);
-    }
-
-    // Always add "Now" label at the end if there's room
-    if (ticks.length === 0 || (maxTs - ticks[ticks.length - 1].ts) > 3600000) {
-      var now = new Date(maxTs);
-      var h = now.getHours();
-      var ampm = h >= 12 ? 'pm' : 'am';
-      var h12 = h % 12 || 12;
-      ticks.push({ ts: maxTs, label: 'Now' });
-    }
-
-    return ticks;
-  }
-
-  var xTicks = getXTicks();
-  ctx.fillStyle = '#7e7e98';
-  ctx.font = '10px monospace';
-  ctx.textAlign = 'center';
-  ctx.strokeStyle = '#2a2a3d';
-  ctx.lineWidth = 1;
-
-  for (var t = 0; t < xTicks.length; t++) {
-    var tx = padL + ((xTicks[t].ts - minTs) / tsRange) * chartW;
-    // Only draw if within chart bounds with margin
-    if (tx >= padL + 10 && tx <= padL + chartW - 10) {
-      // Tick mark
-      ctx.beginPath();
-      ctx.moveTo(tx, padT + chartH);
-      ctx.lineTo(tx, padT + chartH + 4);
-      ctx.stroke();
-      // Label
-      ctx.fillText(xTicks[t].label, tx, padT + chartH + 16);
-    }
-  }
-
-  function toX(ts) {
-    return padL + ((ts - minTs) / tsRange) * chartW;
-  }
-  function toY(val) {
-    return padT + chartH - (val / 100) * chartH;
-  }
-
-  // Draw lines
-  var series = [
-    { key: 'session', color: '#d4845a', label: 'Session' },
-    { key: 'weekAll', color: '#7c7cba', label: 'Weekly (all)' },
-    { key: 'weekSonnet', color: '#4ade80', label: 'Weekly (Sonnet)' },
-  ];
-
-  for (var s = 0; s < series.length; s++) {
-    ctx.strokeStyle = series[s].color;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (var p = 0; p < points.length; p++) {
-      var px = toX(points[p].ts);
-      var py = toY(points[p][series[s].key]);
-      if (p === 0) {
-        ctx.moveTo(px, py);
-      } else {
-        ctx.lineTo(px, py);
-      }
-    }
-    ctx.stroke();
-  }
-
-  // Legend
-  var legendY = h - 6;
-  var legendX = padL;
-  ctx.font = '11px sans-serif';
-  ctx.textAlign = 'left';
-
-  for (var l = 0; l < series.length; l++) {
-    ctx.fillStyle = series[l].color;
-    ctx.fillRect(legendX, legendY - 8, 12, 3);
-    legendX += 16;
-    ctx.fillText(series[l].label, legendX, legendY);
-    legendX += ctx.measureText(series[l].label).width + 20;
-  }
+  usageChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: chartDatasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 600,
+        easing: 'easeOutCubic',
+      },
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#e2e2f0',
+            font: { size: 12, weight: '500' },
+            usePointStyle: true,
+            pointStyle: 'circle',
+            padding: 20,
+          },
+        },
+        tooltip: {
+          backgroundColor: '#1b1b28',
+          borderColor: '#2a2a3d',
+          borderWidth: 1,
+          titleColor: '#7e7e98',
+          bodyColor: '#e2e2f0',
+          titleFont: { size: 11, family: 'monospace' },
+          bodyFont: { size: 12 },
+          padding: 12,
+          cornerRadius: 8,
+          displayColors: true,
+          usePointStyle: true,
+          callbacks: {
+            title: function(items) {
+              if (items.length > 0) {
+                return formatTooltipTitle(items[0].label);
+              }
+              return '';
+            },
+            label: function(item) {
+              return ' ' + item.dataset.label + ': ' + item.parsed.y + '%';
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#7e7e98',
+            font: { size: 10, family: 'monospace' },
+            maxTicksLimit: chartDays <= 7 ? 8 : (chartDays <= 14 ? 8 : 6),
+            callback: function(val, idx) {
+              return formatChartDate(this.getLabelForValue(val));
+            },
+          },
+          grid: {
+            color: '#2a2a3d',
+            drawTicks: true,
+            tickLength: 4,
+          },
+          border: {
+            color: '#2a2a3d',
+          },
+        },
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            color: '#7e7e98',
+            font: { size: 11, family: 'monospace' },
+            stepSize: 25,
+            callback: function(val) {
+              return val + '%';
+            },
+          },
+          grid: {
+            color: '#2a2a3d',
+          },
+          border: {
+            display: false,
+          },
+        },
+      },
+    },
+    plugins: [{
+      id: 'gradientFill',
+      beforeDraw: function(chart) {
+        var ctx = chart.ctx;
+        var area = chart.chartArea;
+        if (!area) return;
+        for (var i = 0; i < chart.data.datasets.length; i++) {
+          var ds = chart.data.datasets[i];
+          var meta = chart.getDatasetMeta(i);
+          if (!meta.hidden) {
+            ds.backgroundColor = makeGradient(ctx, area, chartSeriesDefs[i].color);
+          }
+        }
+      },
+    }],
+  });
 }
 
-// Chart controls
-var chartBtns = document.querySelectorAll('.chart-btn');
-for (var cb = 0; cb < chartBtns.length; cb++) {
-  (function(btn) {
-    btn.addEventListener('click', function() {
-      for (var j = 0; j < chartBtns.length; j++) {
-        chartBtns[j].classList.remove('active');
+// Pill toggle controls
+function initPillToggle() {
+  var pillBtns = document.querySelectorAll('.pill-btn');
+  var slider = document.getElementById('pillSlider');
+  if (!slider || pillBtns.length === 0) return;
+
+  function updateSlider() {
+    var activeBtn = null;
+    for (var i = 0; i < pillBtns.length; i++) {
+      if (pillBtns[i].classList.contains('active')) {
+        activeBtn = pillBtns[i];
+        break;
       }
-      btn.classList.add('active');
-      chartDays = parseInt(btn.getAttribute('data-days'), 10);
-      drawChart();
-    });
-  })(chartBtns[cb]);
+    }
+    if (activeBtn) {
+      slider.style.left = activeBtn.offsetLeft + 'px';
+      slider.style.width = activeBtn.offsetWidth + 'px';
+    }
+  }
+
+  for (var i = 0; i < pillBtns.length; i++) {
+    (function(btn) {
+      btn.addEventListener('click', function() {
+        for (var j = 0; j < pillBtns.length; j++) {
+          pillBtns[j].classList.remove('active');
+        }
+        btn.classList.add('active');
+        chartDays = parseInt(btn.getAttribute('data-days'), 10);
+        updateSlider();
+        drawChart();
+      });
+    })(pillBtns[i]);
+  }
+
+  // Initial slider position (defer to next frame so layout is ready)
+  requestAnimationFrame(updateSlider);
 }
+initPillToggle();
 
 // --- Alerts ---
 
@@ -833,7 +906,10 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
 window.dashboardAPI.getSettings().then(function(settings) {
   if (settings) {
     if (settings.hotkey) currentDisplayHotkey = settings.hotkey;
-    if (settings.version) currentAppVersion = settings.version;
+    if (settings.version) {
+      currentAppVersion = settings.version;
+      document.getElementById('sidebarVersion').textContent = 'v' + currentAppVersion;
+    }
     if (settings.alertThresholds) {
       if (typeof settings.alertThresholds.session === 'number') {
         alertThresholds.session = settings.alertThresholds.session;

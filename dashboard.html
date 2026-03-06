@@ -308,41 +308,66 @@
   }
 
   /* --- History tab --- */
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .chart-header .section-title {
+    margin-bottom: 0;
+  }
+  .chart-pill-toggle {
+    flex-shrink: 0;
+  }
+  .pill-track {
+    position: relative;
+    display: flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .pill-slider {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    height: calc(100% - 6px);
+    border-radius: 17px;
+    background: var(--accent);
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .pill-btn {
+    position: relative;
+    z-index: 1;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 17px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color 0.2s ease;
+    font-family: inherit;
+  }
+  .pill-btn:hover {
+    color: var(--text);
+  }
+  .pill-btn.active {
+    color: #fff;
+  }
   .chart-container {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px;
   }
-  .chart-controls {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-  .chart-btn {
-    padding: 5px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface2);
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .chart-btn:hover {
-    color: var(--text);
-    border-color: var(--text-dim);
-  }
-  .chart-btn.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-  #historyCanvas {
-    width: 100%;
+  .chart-canvas-wrap {
+    position: relative;
     height: 320px;
-    display: block;
   }
 
   /* --- Alerts tab --- */
@@ -623,14 +648,21 @@
   </div>
 
   <div class="tab-content" id="tab-history">
-    <div class="section-title">Usage History</div>
-    <div class="chart-container">
-      <div class="chart-controls">
-        <button class="chart-btn active" data-days="7">7d</button>
-        <button class="chart-btn" data-days="14">14d</button>
-        <button class="chart-btn" data-days="30">30d</button>
+    <div class="chart-header">
+      <div class="section-title">Usage History</div>
+      <div class="chart-pill-toggle">
+        <div class="pill-track">
+          <div class="pill-slider" id="pillSlider"></div>
+          <button class="pill-btn active" data-days="7">7D</button>
+          <button class="pill-btn" data-days="14">14D</button>
+          <button class="pill-btn" data-days="30">30D</button>
+        </div>
       </div>
-      <canvas id="historyCanvas"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="chart-canvas-wrap">
+        <canvas id="historyCanvas"></canvas>
+      </div>
     </div>
   </div>
 
@@ -648,6 +680,7 @@
 </div>
 
 </div>
+<script src="chart.min.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>
