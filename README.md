@@ -1,19 +1,34 @@
 # Claude Meter
 
-A desktop meter that shows your **real-time Claude Pro/Max subscription usage** — session limits, weekly limits, and Sonnet-specific limits — pulled directly from the Anthropic API.
+A desktop widget that shows your **real-time Claude Pro/Max subscription usage** — session limits, weekly limits, and Sonnet-specific limits — pulled directly from the Anthropic API.
 
 ![Screenshot](assets/screenshot.png)
 
 ## Features
 
+### Widget
 - **Real usage data** from the Anthropic API (not estimates)
 - **Global hotkey** (Ctrl+\\) to toggle the widget
 - **System tray** icon with usage tooltip
 - **Auto-refreshes** every 60s when visible, every 5 min in background
 - **Activity-aware** — refreshes when Claude Code writes to session files
 - **Remembers** window size and position
-- **Zero cost** — reads the usage endpoint directly, no messages consumed
 - **Single instance** — won't open duplicates
+- **In-app updates** — detects new versions and updates with one click
+
+### Dashboard
+- **Usage history** — chart of your usage over time
+- **Alert thresholds** — get notified when usage exceeds a percentage
+  - Preset profiles: Relaxed (60%), Standard (80%), Aggressive (95%)
+  - Per-metric sliders for fine-tuning
+- **Settings** — start on login, hotkey configuration
+
+### Platform Support
+| Platform | Format | Auto-update | Desktop shortcut |
+|----------|--------|-------------|------------------|
+| Windows  | `.exe` installer | Yes | Yes (installer) |
+| macOS    | `.dmg` | Yes | Yes (drag to /Applications) |
+| Linux    | `.AppImage` | Yes (in-place) | Yes (auto-created) |
 
 ## Prerequisites
 
@@ -53,14 +68,32 @@ npm start
 
 - Press **Ctrl+\\** to show/hide the widget
 - Click the tray icon to toggle, or right-click for options
-- Enable **"Start on Login"** from the tray menu to auto-start on boot
+- Enable **Start on Login** from the dashboard settings to auto-start on boot
 - The widget auto-refreshes every 60s when visible, every 5 min in background
+- Open the **Dashboard** from the tray menu for history, alerts, and settings
+
+### Updating
+
+The widget checks for updates on launch and every 24 hours. When an update is available, a button appears in the widget — click it to download and install automatically.
+
+**Linux:** The running AppImage is replaced in-place and relaunched. The desktop shortcut updates automatically on next launch.
+
+**Windows:** Downloads and runs the new installer, then quits.
+
+**macOS:** Opens the new `.dmg` for drag-and-drop install.
 
 ## How it works
 
 The widget reads your Claude Code OAuth token from `~/.claude/.credentials.json` and calls the Anthropic usage API endpoint (`/api/oauth/usage`) to fetch your current utilization percentages. No data is sent anywhere except `api.anthropic.com`.
 
 The app is fully open source — inspect the code to verify.
+
+### Linux desktop integration
+
+On Linux, the app automatically:
+- Creates `~/.local/share/applications/claude-meter.desktop` for the app launcher
+- Copies the icon to `~/.local/share/icons/claude-meter.png`
+- Refreshes these on every launch so the path stays current after updates
 
 ## Building
 
