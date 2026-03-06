@@ -417,7 +417,8 @@ function downloadAndInstallUpdate(downloadUrl) {
           try {
             const redirectUrl = new URL(res.headers.location);
             const allowedHosts = ['github.com', 'objects.githubusercontent.com',
-              'github-releases.githubusercontent.com', 'github-production-release-asset-2e65be.s3.amazonaws.com'];
+              'github-releases.githubusercontent.com', 'release-assets.githubusercontent.com',
+              'github-production-release-asset-2e65be.s3.amazonaws.com'];
             if (redirectUrl.protocol !== 'https:' || !allowedHosts.some((h) => redirectUrl.hostname === h || redirectUrl.hostname.endsWith('.' + h))) {
               reject(new Error('Redirect to untrusted host: ' + redirectUrl.hostname));
               return;
