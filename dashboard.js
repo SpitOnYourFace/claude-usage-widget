@@ -937,7 +937,7 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
       btn.textContent = 'Installing...';
       btn.classList.remove('downloading');
       btn.style.backgroundSize = '';
-      btn.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+      btn.style.background = 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899)';
     } else {
       btn.textContent = 'Failed — retry';
       btn.classList.remove('downloading');
