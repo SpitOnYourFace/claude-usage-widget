@@ -1441,10 +1441,19 @@ app.whenReady().then(() => {
           fs.chmodSync(installerPath, 0o755);
           const currentAppImage = process.env.APPIMAGE;
           if (currentAppImage) {
-            // Copy new AppImage over the current one
-            fs.copyFileSync(installerPath, currentAppImage);
+            // Can't overwrite a running binary — rename old, move new in
+            const backupPath = currentAppImage + '.old';
+            try { fs.unlinkSync(backupPath); } catch { /* ignore */ }
+            fs.renameSync(currentAppImage, backupPath);
+            try {
+              // rename is atomic but fails across devices; fall back to copy
+              fs.renameSync(installerPath, currentAppImage);
+            } catch {
+              fs.copyFileSync(installerPath, currentAppImage);
+              fs.unlinkSync(installerPath);
+            }
             fs.chmodSync(currentAppImage, 0o755);
-            fs.unlinkSync(installerPath);
+            try { fs.unlinkSync(backupPath); } catch { /* ignore */ }
             spawn(currentAppImage, [], {
               detached: true,
               stdio: 'ignore',
