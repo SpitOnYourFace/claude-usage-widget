@@ -912,6 +912,7 @@ window.dashboardAPI.onUpdateProgress(function(pct) {
   bar.classList.add('visible');
   fill.style.width = pct + '%';
   btn.textContent = pct + '% downloaded';
+  btn.style.backgroundSize = pct + '% 100%';
 });
 
 document.getElementById('updateNowBtn').addEventListener('click', function() {
@@ -935,9 +936,13 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
     if (result.success) {
       btn.textContent = 'Installing...';
       btn.classList.remove('downloading');
+      btn.style.backgroundSize = '';
+      btn.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
     } else {
       btn.textContent = 'Failed — retry';
       btn.classList.remove('downloading');
+      btn.style.backgroundSize = '';
+      btn.style.background = '';
       document.getElementById('updateProgress').classList.remove('visible');
       setTimeout(function() {
         btn.textContent = 'Update to v' + pendingUpdate.latestVersion;

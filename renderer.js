@@ -224,6 +224,7 @@ window.electronAPI.onUpdateAvailable(function(data) {
 window.electronAPI.onUpdateProgress(function(pct) {
   var btn = document.getElementById('updateBtn');
   btn.textContent = pct + '% downloaded';
+  btn.style.backgroundSize = pct + '% 100%';
 });
 
 document.getElementById('updateBtn').addEventListener('click', function() {
@@ -246,9 +247,13 @@ document.getElementById('updateBtn').addEventListener('click', function() {
     if (result.success) {
       btn.textContent = 'Installing...';
       btn.classList.remove('downloading');
+      btn.style.backgroundSize = '';
+      btn.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
     } else {
       btn.textContent = 'Failed — retry';
       btn.classList.remove('downloading');
+      btn.style.backgroundSize = '';
+      btn.style.background = '';
       setTimeout(function() {
         btn.textContent = 'Update v' + pendingWidgetUpdate.latestVersion;
         btn.disabled = false;
