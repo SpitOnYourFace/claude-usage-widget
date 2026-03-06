@@ -917,10 +917,41 @@ function updateTrayTooltip() {
   }
 }
 
-// --- Linux auto-start via .desktop file ---
+// --- Linux desktop integration ---
 
 const LINUX_AUTOSTART_DIR = path.join(os.homedir(), '.config', 'autostart');
 const LINUX_DESKTOP_FILE = path.join(LINUX_AUTOSTART_DIR, 'claude-meter.desktop');
+const LINUX_APPS_DIR = path.join(os.homedir(), '.local', 'share', 'applications');
+const LINUX_APPS_DESKTOP = path.join(LINUX_APPS_DIR, 'claude-meter.desktop');
+const LINUX_ICON_DIR = path.join(os.homedir(), '.local', 'share', 'icons');
+const LINUX_ICON_FILE = path.join(LINUX_ICON_DIR, 'claude-meter.png');
+
+function ensureLinuxShortcut() {
+  if (process.platform !== 'linux') return;
+  if (fs.existsSync(LINUX_APPS_DESKTOP)) return; // already created
+  try {
+    const exePath = process.env.APPIMAGE || process.execPath;
+    // Copy icon to standard location
+    const iconSrc = getAssetPath('icon.png');
+    if (fs.existsSync(iconSrc)) {
+      fs.mkdirSync(LINUX_ICON_DIR, { recursive: true });
+      fs.copyFileSync(iconSrc, LINUX_ICON_FILE);
+    }
+    fs.mkdirSync(LINUX_APPS_DIR, { recursive: true });
+    const desktop = [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Claude Meter',
+      'Comment=Desktop meter showing Claude usage',
+      'Exec=' + exePath,
+      'Icon=' + (fs.existsSync(LINUX_ICON_FILE) ? LINUX_ICON_FILE : 'claude-meter'),
+      'Terminal=false',
+      'Categories=Utility;',
+      'StartupWMClass=claude-usage-widget',
+    ].join('\n') + '\n';
+    fs.writeFileSync(LINUX_APPS_DESKTOP, desktop);
+  } catch { /* ignore */ }
+}
 
 function getLinuxAutoStart() {
   if (process.platform !== 'linux') return false;
@@ -932,13 +963,13 @@ function setLinuxAutoStart(enabled) {
   if (enabled) {
     try {
       fs.mkdirSync(LINUX_AUTOSTART_DIR, { recursive: true });
-      const exePath = process.execPath;
+      const exePath = process.env.APPIMAGE || process.execPath;
       const desktop = [
         '[Desktop Entry]',
         'Type=Application',
         'Name=Claude Meter',
         'Exec=' + exePath,
-        'Icon=claude-meter',
+        'Icon=' + (fs.existsSync(LINUX_ICON_FILE) ? LINUX_ICON_FILE : 'claude-meter'),
         'Terminal=false',
         'StartupWMClass=claude-usage-widget',
         'X-GNOME-Autostart-enabled=true',
@@ -1146,6 +1177,7 @@ app.whenReady().then(() => {
   cachedUsage = loadCachedUsage();
   usageHistory = loadHistory();
 
+  ensureLinuxShortcut();
   createWindow();
 
   // Tray
