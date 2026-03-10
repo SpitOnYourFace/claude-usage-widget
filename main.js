@@ -274,21 +274,17 @@ function showAlertPopup(label, pct, resetsAt) {
       }
     }
 
-    const js = `
-      (function() {
-        var s = '${severity}';
-        document.getElementById('popup').className = 'popup ' + s;
-        document.getElementById('icon').textContent = s === 'danger' ? '\\u26A0' : '\\u26A1';
-        document.getElementById('title').textContent = '${label} at ${pct}%';
-        document.getElementById('subtitle').textContent = 'Usage threshold exceeded';
-        document.getElementById('barLabel').textContent = '${label}';
-        document.getElementById('barPct').textContent = '${pct}%';
-        document.getElementById('resetInfo').textContent = '${resetText}';
-        setTimeout(function() {
-          document.getElementById('bf').style.width = '${pct}%';
-        }, 50);
-      })();
-    `;
+    const payload = JSON.stringify({ severity, label, pct, resetText });
+    const js = `(function(p){
+      document.getElementById('popup').className='popup '+p.severity;
+      document.getElementById('icon').textContent=p.severity==='danger'?'\\u26A0':'\\u26A1';
+      document.getElementById('title').textContent=p.label+' at '+p.pct+'%';
+      document.getElementById('subtitle').textContent='Usage threshold exceeded';
+      document.getElementById('barLabel').textContent=p.label;
+      document.getElementById('barPct').textContent=p.pct+'%';
+      document.getElementById('resetInfo').textContent=p.resetText;
+      setTimeout(function(){document.getElementById('bf').style.width=p.pct+'%';},50);
+    })(${payload});`;
     alertPopup.webContents.executeJavaScript(js).catch(() => {});
   });
 }
@@ -383,7 +379,11 @@ function checkForUpdates() {
       },
     }, (res) => {
       let body = '';
-      res.on('data', (chunk) => { body += chunk; });
+      const MAX_GH_BODY = 512 * 1024;
+      res.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_GH_BODY) { req.destroy(); resolve({ hasUpdate: false }); return; }
+      });
       res.on('end', () => {
         try {
           const data = JSON.parse(body);
@@ -860,10 +860,14 @@ async function doSync() {
     broadcastUsage();
     updateTrayTooltip();
   } catch (err) {
-    cachedToken = null;
     const safeMsg = typeof err.message === 'string'
       ? err.message.slice(0, 200)
       : 'Unknown error';
+
+    // Only clear token cache for actual auth/network errors, not flow-control
+    if (safeMsg.indexOf('Already syncing') < 0 && safeMsg.indexOf('Rate limited') < 0) {
+      cachedToken = null;
+    }
 
     // No token — show auth error, don't fall back to cached data
     if (safeMsg.indexOf('OAuth') >= 0 || safeMsg.indexOf('No OAuth') >= 0) {
@@ -1189,18 +1193,23 @@ app.whenReady().then(() => {
   };
 
   // IPC
-  ipcMain.on('request-sync', () => {
+  ipcMain.on('request-sync', (event) => {
+    if (!isLocalSender(event)) return;
     rateLimitUntil = 0; // manual refresh always forces through
     doSync();
   });
-  ipcMain.on('minimize-to-tray', () => { if (win) { saveBoundsNow(); win.hide(); } });
+  ipcMain.on('minimize-to-tray', (event) => {
+    if (!isLocalSender(event)) return;
+    if (win) { saveBoundsNow(); win.hide(); }
+  });
   ipcMain.on('quit-app', (event) => {
     if (!isLocalSender(event)) return;
     if (win && !win.isDestroyed()) win.destroy();
     app.quit();
   });
 
-  ipcMain.on('toggle-compact', (_, isCompact) => {
+  ipcMain.on('toggle-compact', (event, isCompact) => {
+    if (!isLocalSender(event)) return;
     if (!win) return;
     const bounds = win.getBounds();
     if (isCompact) {
@@ -1210,7 +1219,10 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.on('open-dashboard', () => openDashboard());
+  ipcMain.on('open-dashboard', (event) => {
+    if (!isLocalSender(event)) return;
+    openDashboard();
+  });
 
   // Auth status check for first-launch onboarding
   ipcMain.handle('check-auth-status', () => {
@@ -1337,8 +1349,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('change-hotkey', async (event, newHotkey) => {
     if (!isLocalSender(event)) return { success: false, error: 'Unauthorized' };
-    if (typeof newHotkey !== 'string' || newHotkey.length === 0) {
-      return { success: false, error: 'Invalid hotkey' };
+    if (typeof newHotkey !== 'string' || newHotkey.length === 0
+      || newHotkey.length > 50 || !SAFE_HOTKEY_RE.test(newHotkey)) {
+      return { success: false, error: 'Invalid hotkey format' };
     }
     try {
       globalShortcut.unregister(currentHotkey);
@@ -1415,8 +1428,10 @@ app.whenReady().then(() => {
     // Validate URL — only allow GitHub releases
     try {
       const parsed = new URL(downloadUrl);
-      const allowedHosts = ['github.com', 'objects.githubusercontent.com'];
-      if (!allowedHosts.includes(parsed.hostname)) {
+      const allowedHosts = ['github.com', 'objects.githubusercontent.com',
+        'github-releases.githubusercontent.com', 'release-assets.githubusercontent.com',
+        'github-production-release-asset-2e65be.s3.amazonaws.com'];
+      if (!allowedHosts.some((h) => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
         return { success: false, error: 'Untrusted download host' };
       }
       if (parsed.protocol !== 'https:') {
@@ -1550,6 +1565,8 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (fileWatcher) fileWatcher.close();
+  if (fileChangeTimer) { clearTimeout(fileChangeTimer); fileChangeTimer = null; }
+  if (boundsDebounce) { clearTimeout(boundsDebounce); boundsDebounce = null; }
 });
 
 app.on('window-all-closed', () => {

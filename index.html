@@ -186,7 +186,8 @@
   }
   .footer-update-btn.visible { display: inline-block; }
   .footer-update-btn.downloading {
-    background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899) no-repeat left / 0% 100%, var(--surface2);
+    background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899) no-repeat left, var(--surface2);
+    background-size: 0% 100%, 100% 100%;
     border-color: rgba(139, 92, 246, 0.4);
     box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
     transition: background-size 0.4s ease;

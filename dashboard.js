@@ -38,7 +38,8 @@ function formatCountdown(ts) {
   var hours = Math.floor(diff / 3600000);
   var mins = Math.floor((diff % 3600000) / 60000);
   if (hours > 0) return 'Resets in ' + hours + 'h ' + mins + 'm';
-  return 'Resets in ' + mins + 'm';
+  if (mins > 0) return 'Resets in ' + mins + 'm';
+  return 'Resets in ' + Math.max(1, Math.floor(diff / 1000)) + 's';
 }
 
 // --- Tab navigation ---
@@ -60,8 +61,9 @@ for (var i = 0; i < navItems.length; i++) {
       var panel = document.getElementById(tabId);
       if (panel) panel.classList.add('active');
 
-      // Redraw chart when history tab becomes visible
+      // Redraw chart and fix pill slider when history tab becomes visible
       if (item.getAttribute('data-tab') === 'history') {
+        requestAnimationFrame(function() { updateSlider(); });
         drawChart();
       }
     });
@@ -809,6 +811,11 @@ function renderSettings() {
             updateBtn.disabled = false;
           }, 3000);
         }
+      }).catch(function() {
+        updateBtn.textContent = 'Failed — retry';
+        updateBtn.classList.remove('downloading');
+        document.getElementById('updateProgress').classList.remove('visible');
+        updateBtn.disabled = false;
       });
       return;
     }
@@ -951,7 +958,7 @@ window.dashboardAPI.onUpdateProgress(function(pct) {
   bar.classList.add('visible');
   fill.style.width = pct + '%';
   btn.textContent = pct + '% downloaded';
-  btn.style.backgroundSize = pct + '% 100%';
+  btn.style.backgroundSize = pct + '% 100%, 100% 100%';
 });
 
 document.getElementById('updateNowBtn').addEventListener('click', function() {
@@ -988,6 +995,13 @@ document.getElementById('updateNowBtn').addEventListener('click', function() {
         btn.disabled = false;
       }, 3000);
     }
+  }).catch(function() {
+    btn.textContent = 'Failed — retry';
+    btn.classList.remove('downloading');
+    btn.style.backgroundSize = '';
+    btn.style.background = '';
+    document.getElementById('updateProgress').classList.remove('visible');
+    btn.disabled = false;
   });
 });
 
@@ -1046,10 +1060,14 @@ function updateDashboardTimers() {
   }
 }
 
-// Redraw chart on window resize
+// Redraw chart on window resize (debounced to avoid flicker)
+var resizeDebounce = null;
 window.addEventListener('resize', function() {
-  var historyTab = document.getElementById('tab-history');
-  if (historyTab && historyTab.classList.contains('active')) {
-    drawChart();
-  }
+  if (resizeDebounce) clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(function() {
+    var historyTab = document.getElementById('tab-history');
+    if (historyTab && historyTab.classList.contains('active')) {
+      drawChart();
+    }
+  }, 150);
 });

@@ -5,6 +5,7 @@ let syncStartHandler = null;
 let syncErrorHandler = null;
 let updateHandler = null;
 let progressHandler = null;
+let authStatusHandler = null;
 
 contextBridge.exposeInMainWorld('electronAPI', {
   requestSync: () => ipcRenderer.send('request-sync'),
@@ -42,6 +43,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchAuthLogin: () => ipcRenderer.invoke('launch-auth-login'),
   openExternalUrl: (url) => ipcRenderer.send('open-external-url', url),
   onAuthStatusChanged: (cb) => {
-    ipcRenderer.on('auth-status-changed', (_e, data) => cb(data));
+    if (authStatusHandler) ipcRenderer.removeListener('auth-status-changed', authStatusHandler);
+    authStatusHandler = (_e, data) => cb(data);
+    ipcRenderer.on('auth-status-changed', authStatusHandler);
   },
 });

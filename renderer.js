@@ -48,7 +48,8 @@ function formatResetTime(ts) {
   var hours = Math.floor(diff / 3600000);
   var mins = Math.floor((diff % 3600000) / 60000);
   if (hours > 0) return 'Resets in ' + hours + 'h ' + mins + 'm';
-  return 'Resets in ' + mins + 'm';
+  if (mins > 0) return 'Resets in ' + mins + 'm';
+  return 'Resets in ' + Math.max(1, Math.floor(diff / 1000)) + 's';
 }
 
 function getBarClass(pct) {
@@ -119,8 +120,9 @@ function updateTimers() {
     { id: 'weekSonnetRow', data: usageData.weekSonnet },
   ];
   for (var i = 0; i < rows.length; i++) {
-    var resetEl = document.getElementById(rows[i].id)
-      .querySelector('.reset-info');
+    var rowEl = document.getElementById(rows[i].id);
+    if (!rowEl) continue;
+    var resetEl = rowEl.querySelector('.reset-info');
     if (resetEl && rows[i].data.resetsAt) {
       resetEl.textContent = formatResetTime(rows[i].data.resetsAt);
     }
@@ -224,7 +226,7 @@ window.electronAPI.onUpdateAvailable(function(data) {
 window.electronAPI.onUpdateProgress(function(pct) {
   var btn = document.getElementById('updateBtn');
   btn.textContent = pct + '% downloaded';
-  btn.style.backgroundSize = pct + '% 100%';
+  btn.style.backgroundSize = pct + '% 100%, 100% 100%';
 });
 
 document.getElementById('updateBtn').addEventListener('click', function() {
@@ -259,6 +261,12 @@ document.getElementById('updateBtn').addEventListener('click', function() {
         btn.disabled = false;
       }, 3000);
     }
+  }).catch(function() {
+    btn.textContent = 'Failed — retry';
+    btn.classList.remove('downloading');
+    btn.style.backgroundSize = '';
+    btn.style.background = '';
+    btn.disabled = false;
   });
 });
 
