@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-widget",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "description": "Desktop meter showing real-time Claude Pro/Max subscription usage",
   "main": "main.js",
   "author": "USER",
@@ -31,6 +31,8 @@
       "index.html",
       "dashboard.html",
       "popup.html",
+      "popup-preload.js",
+      "popup-renderer.js",
       "chart.min.js",
       "assets/**/*"
     ],

@@ -455,25 +455,29 @@ function drawChart() {
   });
 }
 
+// Pill slider position — hoisted to module scope so tab-switch handler can call it
+function updateSlider() {
+  var pillBtns = document.querySelectorAll('.pill-btn');
+  var slider = document.getElementById('pillSlider');
+  if (!slider || pillBtns.length === 0) return;
+  var activeBtn = null;
+  for (var i = 0; i < pillBtns.length; i++) {
+    if (pillBtns[i].classList.contains('active')) {
+      activeBtn = pillBtns[i];
+      break;
+    }
+  }
+  if (activeBtn) {
+    slider.style.left = activeBtn.offsetLeft + 'px';
+    slider.style.width = activeBtn.offsetWidth + 'px';
+  }
+}
+
 // Pill toggle controls
 function initPillToggle() {
   var pillBtns = document.querySelectorAll('.pill-btn');
   var slider = document.getElementById('pillSlider');
   if (!slider || pillBtns.length === 0) return;
-
-  function updateSlider() {
-    var activeBtn = null;
-    for (var i = 0; i < pillBtns.length; i++) {
-      if (pillBtns[i].classList.contains('active')) {
-        activeBtn = pillBtns[i];
-        break;
-      }
-    }
-    if (activeBtn) {
-      slider.style.left = activeBtn.offsetLeft + 'px';
-      slider.style.width = activeBtn.offsetWidth + 'px';
-    }
-  }
 
   for (var i = 0; i < pillBtns.length; i++) {
     (function(btn) {

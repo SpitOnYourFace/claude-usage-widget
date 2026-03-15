@@ -207,7 +207,7 @@ window.electronAPI.onSyncStart(function() {
 
 window.electronAPI.onSyncError(function(msg) {
   setSyncStatus('stale');
-  if (msg && msg.indexOf('OAuth') >= 0) {
+  if (msg && (msg.indexOf('OAuth') >= 0 || msg.indexOf('re-authenticate') >= 0)) {
     showSetupOverlay();
   } else if (msg) {
     lastSyncError = 'Sync failed';
@@ -335,7 +335,19 @@ window.electronAPI.onAuthStatusChanged(function(data) {
 });
 
 // Update countdown + "synced X ago" every second (lightweight, no DOM rebuild)
-setInterval(function() {
-  if (!usageData) return;
-  updateTimers();
-}, 1000);
+// Pauses while window is hidden to avoid unnecessary CPU wakeups
+var timerInterval = null;
+function startTimerInterval() {
+  if (timerInterval) return;
+  timerInterval = setInterval(function() {
+    if (!usageData) return;
+    updateTimers();
+  }, 1000);
+}
+function stopTimerInterval() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) { stopTimerInterval(); } else { startTimerInterval(); }
+});
+startTimerInterval();

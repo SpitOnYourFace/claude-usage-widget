@@ -76,10 +76,12 @@ function loadBounds() {
       const bounds = JSON.parse(fs.readFileSync(BOUNDS_FILE, 'utf-8'));
       // Validate bounds are on a visible screen
       const displays = screen.getAllDisplays();
+      const bw = bounds.width || 480;
+      const bh = bounds.height || 450;
       const visible = displays.some((d) => {
         const { x, y, width, height } = d.bounds;
-        return bounds.x >= x - 100 && bounds.x < x + width
-          && bounds.y >= y - 100 && bounds.y < y + height;
+        return bounds.x + bw > x + 50 && bounds.x < x + width - 50
+          && bounds.y + bh > y + 50 && bounds.y < y + height - 50;
       });
       return visible ? bounds : null;
     }
@@ -248,6 +250,8 @@ function showAlertPopup(label, pct, resetsAt) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'popup-preload.js'),
     },
   });
 
@@ -274,18 +278,7 @@ function showAlertPopup(label, pct, resetsAt) {
       }
     }
 
-    const payload = JSON.stringify({ severity, label, pct, resetText });
-    const js = `(function(p){
-      document.getElementById('popup').className='popup '+p.severity;
-      document.getElementById('icon').textContent=p.severity==='danger'?'\\u26A0':'\\u26A1';
-      document.getElementById('title').textContent=p.label+' at '+p.pct+'%';
-      document.getElementById('subtitle').textContent='Usage threshold exceeded';
-      document.getElementById('barLabel').textContent=p.label;
-      document.getElementById('barPct').textContent=p.pct+'%';
-      document.getElementById('resetInfo').textContent=p.resetText;
-      setTimeout(function(){document.getElementById('bf').style.width=p.pct+'%';},50);
-    })(${payload});`;
-    alertPopup.webContents.executeJavaScript(js).catch(() => {});
+    alertPopup.webContents.send('popup-data', { severity, label, pct, resetText });
   });
 }
 
@@ -382,7 +375,7 @@ function checkForUpdates() {
       const MAX_GH_BODY = 512 * 1024;
       res.on('data', (chunk) => {
         body += chunk;
-        if (body.length > MAX_GH_BODY) { req.destroy(); resolve({ hasUpdate: false }); return; }
+        if (body.length > MAX_GH_BODY) { res.resume(); req.destroy(); resolve({ hasUpdate: false }); return; }
       });
       res.on('end', () => {
         try {
@@ -727,6 +720,13 @@ function fetchUsage() {
         return;
       }
 
+      // Detect expired/invalid token from HTTP status
+      if (res.statusCode === 401 || res.statusCode === 403) {
+        res.resume();
+        finish(new Error('OAuth session expired — please re-authenticate'));
+        return;
+      }
+
       const MAX_BODY = 1024 * 1024; // 1 MB
       let body = '';
       res.on('data', (chunk) => {
@@ -740,7 +740,14 @@ function fetchUsage() {
         try {
           const data = JSON.parse(body);
           if (data.type === 'error') {
-            finish(new Error(data.error?.message || 'API error'));
+            const msg = data.error?.message || 'API error';
+            // Detect auth errors in response body too
+            const errType = (data.error?.type || '').toLowerCase();
+            if (errType.indexOf('auth') >= 0 || errType.indexOf('permission') >= 0) {
+              finish(new Error('OAuth session expired — please re-authenticate'));
+              return;
+            }
+            finish(new Error(msg));
             return;
           }
           // Successful response — clear any rate limit backoff
@@ -816,6 +823,41 @@ function broadcastUsage() {
   }
 }
 
+// --- Retry logic for failed syncs ---
+let retryTimer = null;
+let retryCount = 0;
+const MAX_RETRIES = 5;
+
+function clearRetryTimer() {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  retryCount = 0;
+}
+
+function scheduleAuthRetry() {
+  // Retry with increasing delay: 10s, 20s, 40s, 60s, 60s
+  if (retryCount >= MAX_RETRIES) return;
+  if (retryTimer) clearTimeout(retryTimer);
+  const delay = Math.min(60000, 10000 * Math.pow(2, retryCount));
+  retryCount++;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    cachedToken = null; // force re-read — token may have been refreshed
+    doSync();
+  }, delay);
+}
+
+function scheduleNetworkRetry() {
+  // Network errors after wake: retry 5s, 10s, 20s, 30s, 30s
+  if (retryCount >= MAX_RETRIES) return;
+  if (retryTimer) clearTimeout(retryTimer);
+  const delay = Math.min(30000, 5000 * Math.pow(2, retryCount));
+  retryCount++;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    doSync();
+  }, delay);
+}
+
 // Smart sync — only hits API if data is stale (>2 min old)
 function syncIfStale() {
   if (Date.now() - lastSuccessfulSync < MIN_SYNC_INTERVAL) {
@@ -853,6 +895,7 @@ async function doSync() {
 
     cachedUsage = newUsage;
     lastSuccessfulSync = Date.now();
+    clearRetryTimer(); // sync succeeded — stop retrying
     saveCachedUsage(cachedUsage);
     appendHistory(cachedUsage);
     checkAndNotify(cachedUsage);
@@ -869,20 +912,28 @@ async function doSync() {
       cachedToken = null;
     }
 
-    // No token — show auth error, don't fall back to cached data
-    if (safeMsg.indexOf('OAuth') >= 0 || safeMsg.indexOf('No OAuth') >= 0) {
+    // Auth errors: no token, expired session, or API auth rejection
+    const isAuthError = safeMsg.indexOf('OAuth') >= 0
+      || safeMsg.indexOf('No OAuth') >= 0
+      || safeMsg.indexOf('re-authenticate') >= 0;
+
+    if (isAuthError) {
       if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
       if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
+      // Schedule retry — Claude Code may refresh the token
+      scheduleAuthRetry();
       return;
     }
 
-    // API failed for other reason — fall back to local data with updated syncTime
+    // API failed for other reason — show cached data but DON'T mark as successful
+    // so the next interval will retry the API instead of serving stale data
     const localUsage = buildLocalUsage();
     if (localUsage.session.pct > 0 || cachedUsage) {
       cachedUsage = localUsage;
-      lastSuccessfulSync = Date.now();
       broadcastUsage();
       updateTrayTooltip();
+      // Schedule a retry since this wasn't a real sync
+      scheduleNetworkRetry();
     } else {
       if (win && !win.isDestroyed()) win.webContents.send('sync-error', safeMsg);
       if (dashWin && !dashWin.isDestroyed()) dashWin.webContents.send('sync-error', safeMsg);
@@ -1134,18 +1185,48 @@ function openDashboard() {
 
 // --- File watching ---
 
+let linuxSubWatchers = [];
+
+function onJsonlChange(_, filename) {
+  if (!filename || !/\.jsonl$/i.test(filename)) return;
+  if (fileChangeTimer) clearTimeout(fileChangeTimer);
+  fileChangeTimer = setTimeout(() => {
+    syncIfStale();
+  }, 3000);
+}
+
 function startFileWatcher() {
   try {
     if (!fs.existsSync(PROJECTS_DIR)) return;
-    // recursive: true is only supported on macOS and Windows
     const supportsRecursive = process.platform === 'win32' || process.platform === 'darwin';
-    fileWatcher = fs.watch(PROJECTS_DIR, { recursive: supportsRecursive }, (_, filename) => {
-      if (!filename || !/\.jsonl$/i.test(filename)) return;
-      if (fileChangeTimer) clearTimeout(fileChangeTimer);
-      fileChangeTimer = setTimeout(() => {
-        syncIfStale();
-      }, 3000);
-    });
+
+    if (supportsRecursive) {
+      fileWatcher = fs.watch(PROJECTS_DIR, { recursive: true }, onJsonlChange);
+    } else {
+      // Linux: fs.watch recursive is unsupported — watch each subdirectory individually
+      fileWatcher = fs.watch(PROJECTS_DIR, (eventType, dirname) => {
+        // Watch newly created project subdirectories
+        if (eventType === 'rename' && dirname) {
+          const sub = path.join(PROJECTS_DIR, dirname);
+          try {
+            if (fs.existsSync(sub) && fs.statSync(sub).isDirectory()) {
+              const w = fs.watch(sub, onJsonlChange);
+              linuxSubWatchers.push(w);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+      // Watch existing subdirectories
+      try {
+        const entries = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const w = fs.watch(path.join(PROJECTS_DIR, entry.name), onJsonlChange);
+            linuxSubWatchers.push(w);
+          }
+        }
+      } catch { /* ignore */ }
+    }
   } catch { /* ignore */ }
 }
 
@@ -1193,6 +1274,11 @@ app.whenReady().then(() => {
   };
 
   // IPC
+  ipcMain.on('popup-dismiss', (event) => {
+    if (!isLocalSender(event)) return;
+    if (alertPopup && !alertPopup.isDestroyed()) alertPopup.close();
+  });
+
   ipcMain.on('request-sync', (event) => {
     if (!isLocalSender(event)) return;
     rateLimitUntil = 0; // manual refresh always forces through
@@ -1338,8 +1424,9 @@ app.whenReady().then(() => {
       };
       const keys = ['session', 'weekAll', 'weekSonnet'];
       for (const key of keys) {
-        if (t[key] && typeof t[key] === 'object') {
-          const val = clampThreshold(t[key].value);
+        if (t[key] != null) {
+          const raw = typeof t[key] === 'object' ? t[key].value : t[key];
+          const val = clampThreshold(raw);
           if (val !== null) ALERT_THRESHOLDS[key] = val;
         }
       }
@@ -1542,11 +1629,14 @@ app.whenReady().then(() => {
   });
 
   powerMonitor.on('resume', () => {
-    // PC woke up — reset state and sync immediately
+    // PC woke up — reset state, clear stale token, and sync
     syncing = false;
     syncStartedAt = 0;
     activeRequest = null;
-    setTimeout(() => syncIfStale(), 500);
+    cachedToken = null; // force re-read — token may have expired during sleep
+    clearRetryTimer(); // reset retry state for a fresh start
+    // Wait 2s for network stack to reconnect after wake
+    setTimeout(() => doSync(), 2000);
   });
 
   // Check for updates on start, then every 24h
@@ -1565,7 +1655,10 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (fileWatcher) fileWatcher.close();
+  for (const w of linuxSubWatchers) { try { w.close(); } catch {} }
+  linuxSubWatchers = [];
   if (fileChangeTimer) { clearTimeout(fileChangeTimer); fileChangeTimer = null; }
+  clearRetryTimer();
   if (boundsDebounce) { clearTimeout(boundsDebounce); boundsDebounce = null; }
 });
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';">
 <title>Claude Meter Alert</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -155,11 +155,6 @@
     <div class="countdown-fill" id="countdownFill"></div>
   </div>
 </div>
-<script>
-  document.getElementById('dismissBtn').addEventListener('click', function() {
-    window.close();
-  });
-  setTimeout(function() { window.close(); }, 8000);
-</script>
+<script src="popup-renderer.js"></script>
 </body>
 </html>
