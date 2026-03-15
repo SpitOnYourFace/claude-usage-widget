@@ -43,15 +43,13 @@
       "icon": "assets/icon.ico"
     },
     "nsis": {
-      "oneClick": false,
-      "perMachine": false,
+      "oneClick": true,
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "include": "build/installer.nsh",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "warningsAsErrors": false
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [
